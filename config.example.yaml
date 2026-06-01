@@ -1,0 +1,23 @@
+default_cluster: local
+clusters:
+  local:
+    brokers: ["localhost:9092"]
+    auth:
+      type: plaintext
+
+  staging:
+    brokers: ["b1.example:9094", "b2.example:9094"]
+    tls: true
+    auth:
+      type: scram
+      mechanism: SCRAM-SHA-512
+      username: svc-franta
+      password_env: FRANTA_STAGING_PASSWORD
+
+  prod-msk:
+    brokers: ["b-1.msk.example:9098", "b-2.msk.example:9098"]
+    tls: true
+    auth:
+      type: iam
+      region: eu-west-1
+      profile: prod

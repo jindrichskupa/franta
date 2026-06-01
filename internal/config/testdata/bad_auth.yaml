@@ -1,0 +1,7 @@
+clusters:
+  oops:
+    brokers: ["localhost:9092"]
+    auth:
+      type: scram
+      username: svc
+      password_env: PW

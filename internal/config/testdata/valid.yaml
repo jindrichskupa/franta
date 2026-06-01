@@ -1,0 +1,14 @@
+default_cluster: local
+clusters:
+  local:
+    brokers: ["localhost:9092"]
+    auth:
+      type: plaintext
+  staging:
+    brokers: ["b1:9094", "b2:9094"]
+    tls: true
+    auth:
+      type: scram
+      mechanism: SCRAM-SHA-512
+      username: svc
+      password_env: STAGING_PW

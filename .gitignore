@@ -1,0 +1,6 @@
+/franta
+/dist/
+*.test
+.env
+.env.*
+/docs/
