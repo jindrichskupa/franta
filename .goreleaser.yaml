@@ -52,9 +52,9 @@ nfpms:
     package_name: franta
     file_name_template: >-
       {{ .PackageName }}_{{ .Version }}_{{ .Arch }}
-    vendor: "franta contributors"
-    homepage: "https://github.com/segfault-labs/franta"
-    maintainer: "franta contributors <noreply@example.com>"
+    vendor: "Jindrich Skupa"
+    homepage: "https://github.com/jindrichskupa/franta"
+    maintainer: "Jindrich Skupa <jindrich.skupa@gmail.com>"
     description: |
       Terminal UI for Apache Kafka with AWS MSK IAM auth, SQL-ish filter DSL,
       consumer-group lag, and Schema Registry decoding (Confluent + AWS Glue).
@@ -125,18 +125,18 @@ release:
 
     **Debian / Ubuntu:**
     ```bash
-    curl -sL https://github.com/segfault-labs/franta/releases/download/{{ .Tag }}/franta_{{ .Version }}_amd64.deb -o franta.deb
+    curl -sL https://github.com/jindrichskupa/franta/releases/download/{{ .Tag }}/franta_{{ .Version }}_amd64.deb -o franta.deb
     sudo apt install ./franta.deb
     ```
 
     **macOS / Linux tarball:**
     ```bash
-    curl -sL https://github.com/segfault-labs/franta/releases/download/{{ .Tag }}/franta_{{ .Version }}_$(uname -s)_$(uname -m).tar.gz | tar xz
+    curl -sL https://github.com/jindrichskupa/franta/releases/download/{{ .Tag }}/franta_{{ .Version }}_$(uname -s)_$(uname -m).tar.gz | tar xz
     ```
 
     **Go:**
     ```bash
-    go install github.com/segfault-labs/franta/cmd/franta@{{ .Tag }}
+    go install github.com/jindrichskupa/franta/cmd/franta@{{ .Tag }}
     ```
   footer: |
-    **Full Changelog**: https://github.com/segfault-labs/franta/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/jindrichskupa/franta/compare/{{ .PreviousTag }}...{{ .Tag }}
