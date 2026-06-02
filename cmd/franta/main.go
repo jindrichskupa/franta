@@ -17,13 +17,19 @@ import (
 	"franta/internal/tui"
 )
 
-const version = "0.0.0-dev"
+// version, commit, date are injected at build time via ldflags by goreleaser.
+// Defaults make `go run` / `go build` produce something sensible.
+var (
+	version = "0.0.0-dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
 	if len(os.Args) >= 2 {
 		switch os.Args[1] {
 		case "version":
-			fmt.Println("franta", version)
+			fmt.Printf("franta %s (commit %s, built %s)\n", version, commit, date)
 			return
 		case "consume":
 			if err := runConsume(os.Args[2:]); err != nil {

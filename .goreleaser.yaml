@@ -1,0 +1,142 @@
+# goreleaser config: https://goreleaser.com
+# Run locally:  goreleaser release --snapshot --clean --skip publish
+version: 2
+
+project_name: franta
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: franta
+    main: ./cmd/franta
+    binary: franta
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: archives
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: ["zip"]
+    files:
+      - README.md
+      - LICENSE*
+      - config.example.yaml
+
+# Debian / Ubuntu .deb packages built via nfpm (same .deb installs on both;
+# Ubuntu is Debian-derived and the dependency set used here is universal).
+nfpms:
+  - id: deb
+    package_name: franta
+    file_name_template: >-
+      {{ .PackageName }}_{{ .Version }}_{{ .Arch }}
+    vendor: "franta contributors"
+    homepage: "https://github.com/segfault-labs/franta"
+    maintainer: "franta contributors <noreply@example.com>"
+    description: |
+      Terminal UI for Apache Kafka with AWS MSK IAM auth, SQL-ish filter DSL,
+      consumer-group lag, and Schema Registry decoding (Confluent + AWS Glue).
+    license: MIT
+    formats:
+      - deb
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: config.example.yaml
+        dst: /usr/share/franta/config.example.yaml
+        type: config|noreplace
+      - src: README.md
+        dst: /usr/share/doc/franta/README.md
+    # Same artifact works for Debian and Ubuntu — both consume .deb. The
+    # release notes will recommend `apt install ./franta_*_amd64.deb`.
+    deb:
+      lintian_overrides:
+        - statically-linked-binary
+        - changelog-file-missing-in-native-package
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Performance
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 2
+    - title: Refactor
+      regexp: "^.*refactor[(\\w)]*:+.*$"
+      order: 3
+    - title: Other
+      order: 99
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+      - "^typo"
+
+release:
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## franta {{ .Tag }}
+
+    Terminal UI for Apache Kafka.
+
+    ### Install
+
+    **Debian / Ubuntu:**
+    ```bash
+    curl -sL https://github.com/segfault-labs/franta/releases/download/{{ .Tag }}/franta_{{ .Version }}_amd64.deb -o franta.deb
+    sudo apt install ./franta.deb
+    ```
+
+    **macOS / Linux tarball:**
+    ```bash
+    curl -sL https://github.com/segfault-labs/franta/releases/download/{{ .Tag }}/franta_{{ .Version }}_$(uname -s)_$(uname -m).tar.gz | tar xz
+    ```
+
+    **Go:**
+    ```bash
+    go install github.com/segfault-labs/franta/cmd/franta@{{ .Tag }}
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/segfault-labs/franta/compare/{{ .PreviousTag }}...{{ .Tag }}
