@@ -103,6 +103,9 @@ func lastNTargets(start, end map[int32]int64, n int64) map[int32]int64 {
 // reset, but Seek handles it explicitly so it works for live re-seeks.
 func (c *Consumer) Seek(ctx context.Context, spec StartSpec) error {
 	topic := c.currentTopic()
+	if topic == "" {
+		return fmt.Errorf("seek: no topic selected — pick one in the topics pane (enter) before seeking")
+	}
 	adm := kadm.NewClient(c.cl)
 	var set map[string]map[int32]kgo.EpochOffset
 	switch spec.Kind {

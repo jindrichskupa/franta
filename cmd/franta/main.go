@@ -105,7 +105,9 @@ func runTUI(args []string) error {
 	fs := flag.NewFlagSet("franta", flag.ExitOnError)
 	cfgPath := fs.String("config", config.DefaultPath(), "path to config file")
 	cluster := fs.String("cluster", "", "cluster name")
-	from := fs.String("from", "end", "start position: end | beginning | last:N | <duration> | RFC3339")
+	// Default empty so we can tell "user didn't set it" apart from "user picked
+	// end explicitly"; cluster.default_seek fills it in when unset.
+	from := fs.String("from", "", "start position: end | beginning | last:N | <duration> | RFC3339 (defaults to cluster.default_seek or end)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -114,15 +116,33 @@ func runTUI(args []string) error {
 	}
 	argTopic := fs.Arg(0) // may be empty -> startup picker
 
-	spec, err := kafka.ParseStart(*from)
-	if err != nil {
-		return err
-	}
-
 	name, cl, err := resolveCluster(*cfgPath, *cluster)
 	if err != nil {
 		return err
 	}
+
+	fromValue := *from
+	if fromValue == "" {
+		fromValue = cl.DefaultSeek
+	}
+	if fromValue == "" {
+		fromValue = "end"
+	}
+	spec, err := kafka.ParseStart(fromValue)
+	if err != nil {
+		return err
+	}
+
+	// Load saved filters: inline (config.yaml) + side-file (filters.yaml) so
+	// the user can edit by hand or save from the TUI.
+	sideFilters, _ := config.LoadFilters(config.FiltersPath(*cfgPath))
+	cfg, _ := config.Load(*cfgPath)
+	var inlineFilters []config.SavedFilter
+	if cfg != nil {
+		inlineFilters = cfg.SavedFilters
+	}
+	savedFilters := config.MergeFilters(inlineFilters, sideFilters)
+	filtersPath := config.FiltersPath(*cfgPath)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -231,6 +251,19 @@ func runTUI(args []string) error {
 		},
 		Cluster: name,
 		Topic:   topic,
+		SavedFilters: func() []tui.SavedFilter {
+			out := make([]tui.SavedFilter, len(savedFilters))
+			for i, f := range savedFilters {
+				out[i] = tui.SavedFilter{Name: f.Name, Query: f.Query}
+			}
+			return out
+		}(),
+		SaveFilter: func(n, q string) error {
+			return config.SaveFilter(filtersPath, config.SavedFilter{Name: n, Query: q})
+		},
+		DeleteFilter: func(n string) error {
+			return config.DeleteFilter(filtersPath, n)
+		},
 	})
 }
 

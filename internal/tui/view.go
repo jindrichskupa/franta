@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -19,6 +20,12 @@ var (
 
 // View satisfies tea.Model.
 func (m Model) View() string {
+	if m.errDialog != "" {
+		return m.errorDialogView()
+	}
+	if m.pickingFilter {
+		return m.filterPickerView()
+	}
 	if m.showHelp {
 		return m.helpView()
 	}
@@ -31,6 +38,49 @@ func (m Model) View() string {
 	return m.normalView()
 }
 
+// errorDialogView renders a centered red-bordered modal that holds focus until
+// dismissed. Used for fatal-ish errors (seek/switch/produce/error msgs) so
+// they cannot be missed by a flicker on the footer.
+func (m Model) errorDialogView() string {
+	w := m.width * 60 / 100
+	if w < 50 {
+		w = 50
+	}
+	if w > 100 {
+		w = 100
+	}
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+	hint := statusStyle.Render("press enter / esc / space / any key to dismiss")
+	body := titleStyle.Render("⚠ " + firstLine(m.errDialog))
+	if rest := afterFirstLine(m.errDialog); rest != "" {
+		body += "\n\n" + rest
+	}
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")).
+		Padding(1, 2).
+		Width(w).
+		Render(body + "\n\n" + hint)
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+	return dialog
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func afterFirstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimLeft(s[i+1:], "\n")
+	}
+	return ""
+}
+
 const helpText = `franta — keys
 
   1 / 2 / 3 / t       focus topics / messages / detail (t = topics)
@@ -41,6 +91,8 @@ const helpText = `franta — keys
   /                   topics: fuzzy topic search
                       messages: DSL filter (see below)
   f                   open DSL filter from any pane (alias for messages /)
+  F                   recall a saved filter (picker; d deletes)
+  ctrl+s              in filter editor: save the current query under a name
   i / r               topics: toggle internal / reload
   s                   seek prompt (modal): end | beginning | last:N | 1h | RFC3339
   p                   produce form (modal): topic, key, headers (k=v,k=v), value (textarea)
@@ -95,7 +147,11 @@ func (m Model) normalView() string {
 	if topic == "" {
 		topic = "(no topic — pick one in the topics pane)"
 	}
-	header := statusStyle.Render(fmt.Sprintf("%s / %s", m.cluster, topic))
+	headerLine := fmt.Sprintf("%s / %s", m.cluster, topic)
+	if g := adaGreeting(time.Now()); g != "" {
+		headerLine += "   " + g
+	}
+	header := statusStyle.Render(headerLine)
 	footer := statusStyle.Render(m.normalFooter())
 
 	// lipgloss Width/Height set the INNER content box; the border adds 2 cells
@@ -204,21 +260,42 @@ func (m Model) topicsPaneContent(innerW int) string {
 	if len(m.filteredTopics) == 0 {
 		return "(no topics match)"
 	}
-	// Visible window approximated from pane height. Same windowedList helper as
-	// the groups pane → identical N/M counter behaviour.
+	// Two visual markers distinguish "cursor" vs "currently consuming":
+	//   "> "  cursor (where enter would switch)
+	//   "● "  the topic the consumer is currently reading from
+	// Both can be the same row, in which case the cursor marker wins.
+	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true) // green = live
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	current := m.topic
+
 	entries := m.height - 7 // border (2) + header + footer + title + search line
 	out := windowedList(len(m.filteredTopics), m.topicCursor, entries, func(i int) string {
 		ti := m.topics[m.filteredTopics[i]]
-		marker := "  "
-		if i == m.topicCursor {
+		isCursor := i == m.topicCursor
+		isActive := current != "" && ti.Name == current
+		var marker string
+		switch {
+		case isCursor:
 			marker = "> "
+		case isActive:
+			marker = "● "
+		default:
+			marker = "  "
 		}
 		// Reserve right side for counts; truncate name to fit.
 		nameW := innerW - 18
 		if nameW < 6 {
 			nameW = 6
 		}
-		return fmt.Sprintf("%s%s p:%d m:%s\n", marker, truncate(ti.Name, nameW), ti.Partitions, shortNum(ti.Messages))
+		line := fmt.Sprintf("%s%s p:%d m:%s", marker, truncate(ti.Name, nameW), ti.Partitions, shortNum(ti.Messages))
+		switch {
+		case isCursor:
+			return cursorStyle.Render(line) + "\n"
+		case isActive:
+			return activeStyle.Render(line) + "\n"
+		default:
+			return line + "\n"
+		}
 	})
 	if m.topicsErr != "" {
 		out += "\n⚠ " + m.topicsErr
@@ -274,6 +351,8 @@ func windowRange(cursor, rows, total int) (first, last int) {
 // (with the transient status prefixed when present).
 func (m Model) normalFooter() string {
 	switch {
+	case m.savingFilter:
+		return m.saveFilterPromptView()
 	case m.filtering:
 		return m.filterPanel()
 	case m.seeking:
@@ -329,7 +408,7 @@ func (m Model) filterPanel() string {
 		"fields: key, value, value.<json.path>, partition, offset, timestamp, header['name']\n" +
 			"ops:    == != < > <= >= contains matches    and / or / not / ()\n" +
 			"ex:     header['x-trace-id'] == \"abc\"   |   value.amount >= 100   |   key contains \"user-\"")
-	help := statusStyle.Render("enter apply  •  esc cancel  •  empty input clears the filter")
+	help := statusStyle.Render("enter apply  •  ctrl+s save as…  •  esc cancel  •  empty input clears the filter")
 	return m.queryIn.View() + "  " + parseStatus + "\n" + hint + "\n" + help
 }
 
