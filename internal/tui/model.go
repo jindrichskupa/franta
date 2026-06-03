@@ -100,17 +100,31 @@ type Model struct {
 	buf  *record.Buffer
 	pred query.Predicate
 
-	mode    viewMode
-	width   int
-	height  int
-	status  string
-	produce ProduceFunc
+	mode      viewMode
+	width     int
+	height    int
+	status    string
+	errDialog string // non-empty → modal error overlay; dismissed by any key
+	produce   ProduceFunc
 
 	table   table.Model
 	detail  viewport.Model
 	queryIn textinput.Model
 
 	filtering bool // query bar focused
+
+	// Saved filter state. savedFilters is the loaded list (config.yaml inline
+	// + filters.yaml side-file, merged). filterPicker holds picker-modal state.
+	savedFilters     []SavedFilter
+	saveFilterFn     SaveFilterFunc
+	deleteFilterFn   DeleteFilterFunc
+	pickingFilter    bool
+	filterPickCursor int
+	// savingFilter is the in-progress "save filter as…" prompt that opens
+	// from ctrl+s in the filter editor.
+	savingFilter   bool
+	saveFilterIn   textinput.Model
+	pendingSaveQry string // captured at ctrl+s so refreshes don't drop it
 
 	// live re-seek
 	seek    SeekFunc
@@ -297,13 +311,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		if msg.err != nil {
-			m.status = "error: " + msg.err.Error()
+			m.errDialog = "Error\n\n" + msg.err.Error()
 		}
 		return m, nil
 
 	case producedMsg:
 		if msg.err != nil {
-			m.status = "produce failed: " + msg.err.Error()
+			m.errDialog = "Produce failed\n\n" + msg.err.Error()
 		} else {
 			m.status = "produced"
 			m.mode = modeNormal
@@ -312,7 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case seekDoneMsg:
 		if msg.err != nil {
-			m.status = "seek failed: " + msg.err.Error()
+			m.errDialog = "Seek failed\n\n" + msg.err.Error()
 			return m, nil
 		}
 		// Clear only if no record of this generation has arrived yet (strict >),
@@ -371,7 +385,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case switchedMsg:
 		if msg.err != nil {
-			m.status = "switch failed: " + msg.err.Error()
+			m.errDialog = "Topic switch failed\n\n" + msg.err.Error()
 			return m, nil
 		}
 		m.topic = msg.topic
@@ -460,6 +474,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Save-filter prompt has priority over the picker (it can only open from
+	// inside the filter editor, after ctrl+s).
+	if m.savingFilter {
+		return m.updateSaveFilterPrompt(msg)
+	}
+	if m.pickingFilter {
+		return m.updateFilterPicker(msg)
+	}
+	// Error dialog is the top-most overlay — eats everything except quit and
+	// dismiss, so a failure can never be missed by drifting off the footer.
+	if m.errDialog != "" {
+		switch {
+		case msg.Type == tea.KeyCtrlC:
+			return m, tea.Quit
+		case msg.Type == tea.KeyEsc, msg.Type == tea.KeyEnter, msg.Type == tea.KeySpace:
+			m.errDialog = ""
+			return m, nil
+		}
+		// Any other key dismisses too — be forgiving so a user mashing keys
+		// gets back to work fast.
+		m.errDialog = ""
+		return m, nil
+	}
+
 	// Help overlay swallows everything except its own close keys.
 	if m.showHelp {
 		switch {
@@ -536,6 +574,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filtering = true
 		m.queryIn.Focus()
 		return m, nil
+	case "F":
+		// Recall a saved filter — picker modal of names.
+		if len(m.savedFilters) == 0 {
+			m.status = "no saved filters (ctrl+s in the filter editor to save one)"
+			return m, nil
+		}
+		m.pickingFilter = true
+		m.filterPickCursor = 0
+		return m, nil
 	case "p":
 		if m.produce != nil {
 			m = m.openProducer()
@@ -596,6 +643,22 @@ func (m Model) updateFilterPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+	case tea.KeyCtrlS:
+		// "Save as…" — open the save-filter prompt with the current query
+		// captured. The editor stays open behind it so the user can come back.
+		raw := strings.TrimSpace(m.queryIn.Value())
+		if raw == "" {
+			m.status = "nothing to save (filter is empty)"
+			return m, nil
+		}
+		m.pendingSaveQry = raw
+		m.savingFilter = true
+		ti := textinput.New()
+		ti.Prompt = "save filter as: "
+		ti.Placeholder = "errors"
+		ti.Focus()
+		m.saveFilterIn = ti
+		return m, nil
 	case tea.KeyEsc:
 		m.filtering = false
 		m.queryIn.Blur()

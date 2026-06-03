@@ -72,12 +72,26 @@ type Cluster struct {
 	TLS            bool            `yaml:"tls"`
 	Auth           Auth            `yaml:"auth"`
 	SchemaRegistry *SchemaRegistry `yaml:"schema_registry"`
+	// DefaultSeek is the start position used when no --from flag is provided
+	// (same mini-syntax as the CLI: end | beginning | last:N | <duration> |
+	// RFC3339). Empty falls back to "end".
+	DefaultSeek string `yaml:"default_seek"`
+}
+
+// SavedFilter is one named DSL filter the user can recall from the TUI.
+type SavedFilter struct {
+	Name  string `yaml:"name"`
+	Query string `yaml:"query"`
 }
 
 // Config is the top-level configuration document.
 type Config struct {
 	DefaultCluster string             `yaml:"default_cluster"`
 	Clusters       map[string]Cluster `yaml:"clusters"`
+	// SavedFilters loaded from the main config.yaml (treated as read-only — the
+	// app preserves comments in config.yaml by writing user-added filters to a
+	// separate filters.yaml in the same directory).
+	SavedFilters []SavedFilter `yaml:"saved_filters"`
 }
 
 // Load reads and parses a YAML config file.

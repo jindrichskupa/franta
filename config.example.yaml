@@ -21,3 +21,15 @@ clusters:
       type: iam
       region: eu-west-1
       profile: prod
+    # Optional. Same mini-syntax as --from. Used when --from is not on the CLI.
+    # Falls back to "end" if unset on the cluster too.
+    default_seek: last:500
+
+# Optional. Read-only inline filter library. Use ctrl+s in the TUI filter editor
+# to save more — those land in filters.yaml next to this file (preserves the
+# comments here). F recalls.
+saved_filters:
+  - name: errors
+    query: 'header[''severity''] == "ERROR" or value.error contains "FAIL"'
+  - name: paid-orders
+    query: 'value.status == "PAID" and value.amount >= 100'
