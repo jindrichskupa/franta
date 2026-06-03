@@ -50,7 +50,10 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v8
         with:
-          # v2 line is built with go1.25+, required to lint modules pinned at
-          # go 1.26 in go.mod. Action v8 is the v2-compatible release line.
-          version: v2.1.6
+          # Need a release binary built with go1.26+ to lint modules pinned at
+          # go 1.26 in go.mod. v2.12.x is built with go1.26; older 2.x line
+          # (incl. 2.1.6) is still on go1.24 and fails with "go language
+          # version used to build golangci-lint is lower than the targeted
+          # Go version".
+          version: v2.12.2
           args: --timeout=5m
