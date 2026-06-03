@@ -37,11 +37,18 @@ prod-msk / orders
 
 - **3-pane layout**: topics (left), messages table (top-right), record detail
   (bottom-right). Tab / `1`/`2`/`3`/`t` switch focus.
+- **Active-topic marker**: `●` highlights the topic you're consuming; `>`
+  marks the cursor (where Enter would switch). Distinct colours so you never
+  lose track of which is which.
 - **Live tail** with pause/resume (`space`) — records keep buffering when frozen.
 - **Filter DSL** over key / value / `value.<json.path>` / partition / offset /
   timestamp / `header['name']` — `==`, `!=`, `<`, `>`, `<=`, `>=`, `contains`,
   `matches`, combined with `and` / `or` / `not` / `()`. Live parse status, hint
   panel, and match counter on apply.
+- **Saved filters**: pre-load named queries from `config.yaml`, save more from
+  the TUI with `ctrl+s` in the filter editor (writes to a `filters.yaml`
+  side-file so your config comments survive). `F` recalls the picker; `d`
+  deletes.
 - **Fuzzy topic + group search** (`/`) with bottom-of-screen input, live
   `N/total` counter, persistent `[search: q M/N]` indicator after Enter.
 - **Sort cycle** (`o`) on both lists: name↑ / count↓ / parts-or-members↓.
@@ -53,11 +60,15 @@ prod-msk / orders
 - **Producer dialog**: topic / key / multi-line headers (`k=v` per line *or*
   JSON `{"k":"v"}`) / multi-line value textarea. `P` from a selected record
   pre-fills the form ("produce with template"); `ctrl+s` sends.
-- **Consumer groups**: list (left) + lag and members (right). Tab toggles
-  pane focus; viewport scrolls the detail. Lag column auto-fills.
+- **Consumer groups**: list (left) + lag and members (right). Tab / `1`/`2`
+  toggle pane focus; viewport scrolls the detail. Lag column auto-fills.
 - **Offset seek** (`s`): `end | beginning | last:N | <duration like 1h> |
-  RFC3339`. Generation-stamped — late records from a superseded position get
-  dropped instead of polluting the view.
+  RFC3339`. Per-cluster default via `default_seek` in config. Generation-
+  stamped — late records from a superseded position get dropped instead of
+  polluting the view.
+- **Error dialog**: failures (seek / switch / produce / runtime) raise a
+  centred red modal that holds focus until dismissed — they cannot be missed
+  flickering past on the footer.
 - **Schema Registry decoding** for Confluent (`magic 0x00 + 4-byte schema id`)
   and AWS Glue (`0x03 + compression + 16-byte UUID`):
   - JSON Schema (display passthrough + light validation)
@@ -212,6 +223,9 @@ clusters:
       type: iam
       region: eu-central-1
       # profile: my-aws-profile     # optional; default chain otherwise
+    # Used when --from is not on the CLI. Same mini-syntax as the CLI flag.
+    # Falls back to "end" if unset.
+    default_seek: last:500
     schema_registry:
       type: glue                    # or: confluent
       region: eu-central-1
@@ -220,6 +234,15 @@ clusters:
       protobuf:
         single_file: schemas/orders.proto
         well_known_paths: ["/usr/include"]
+
+# Optional. Read-only inline filter library. Use ctrl+s in the TUI filter editor
+# to save more; those land in filters.yaml next to this file so these comments
+# are preserved. F recalls.
+saved_filters:
+  - name: errors
+    query: 'header[''severity''] == "ERROR" or value.error contains "FAIL"'
+  - name: paid-orders
+    query: 'value.status == "PAID" and value.amount >= 100'
 ```
 
 Auth types:
@@ -232,6 +255,21 @@ Auth types:
 
 Schema Registry kinds: `confluent` (URL + optional basic auth) or `glue`
 (AWS region + registry name; uses the IAM auth chain).
+
+### Saved filters
+
+Two sources, merged on load (side-file wins on name collision):
+
+- **`config.yaml`** — top-level `saved_filters:` list. Read-only; safe place
+  for filters you want to version with your config.
+- **`filters.yaml`** — sits next to `config.yaml`. Owned by the app: the
+  `ctrl+s` save action and `d` delete action in the TUI rewrite this file
+  atomically. Your `config.yaml` comments are never touched.
+
+In the TUI: `f` (or `/` in the messages pane) opens the filter editor.
+`ctrl+s` inside the editor prompts for a name and persists the current
+query. `F` opens the saved-filter picker (enter applies, `d` deletes, `esc`
+cancels).
 
 ## Usage
 
@@ -266,10 +304,11 @@ franta consume --cluster local        # interactive topic picker
 | `space`         | Pause / resume tailing                         |
 | `s`             | Open seek prompt (`end / beginning / last:N / 1h / RFC3339`) |
 | `f`             | Open DSL filter from any pane (alias for messages `/`) |
+| `F`             | Recall a saved filter (picker; `d` deletes)    |
 | `p` / `P`       | Open producer dialog / produce with template from selected record |
 | `g`             | Open consumer groups view                      |
 | `?`             | Toggle help overlay                            |
-| `esc`           | Cancel a prompt / close a modal                |
+| `esc`           | Cancel a prompt / close a modal / dismiss the error dialog |
 | `q` / `ctrl+c`  | Quit                                           |
 
 ### Topics pane
@@ -289,6 +328,15 @@ franta consume --cluster local        # interactive topic picker
 |-----|-----------------------------------------------------|
 | `↑` `↓` `pgup` `pgdn` | Move cursor                       |
 | `/` or `f`            | Open DSL filter                   |
+| `F`                   | Saved-filter picker                |
+
+### Filter editor (open via `/` or `f`)
+
+| Key       | Action                                             |
+|-----------|----------------------------------------------------|
+| `enter`   | Apply (status shows match count)                   |
+| `ctrl+s`  | Save the current query under a name → `filters.yaml` |
+| `esc`     | Cancel                                             |
 
 ### Consumer groups view
 

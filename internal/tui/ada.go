@@ -31,8 +31,5 @@ func adaGreeting(now time.Time) string {
 	if sameDate(now.AddDate(0, 0, 1), ald) {
 		return "🎂 Zítra je svátek Ady (Ada Lovelace Day) — kup dort!"
 	}
-	// Year boundary: if "tomorrow" lands in January but ALD is in October next
-	// year, the AddDate check above still works — but checking next-year ALD
-	// when we are in late December is moot (ALD is always October).
 	return ""
 }

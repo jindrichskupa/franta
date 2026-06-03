@@ -69,8 +69,6 @@ func (m Model) updateFilterPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		// Drop from the in-memory list too so the picker reflects the change
-		// without a reload.
 		m.savedFilters = append(m.savedFilters[:m.filterPickCursor], m.savedFilters[m.filterPickCursor+1:]...)
 		if m.filterPickCursor >= len(m.savedFilters) && len(m.savedFilters) > 0 {
 			m.filterPickCursor = len(m.savedFilters) - 1
@@ -110,7 +108,6 @@ func (m Model) updateSaveFilterPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		// Update or append in the in-memory list so the picker sees it next time.
 		updated := false
 		for i, f := range m.savedFilters {
 			if f.Name == name {
@@ -178,6 +175,4 @@ func (m Model) saveFilterPromptView() string {
 		hint
 }
 
-// Need to silence go's "imported and not used" when textinput is the only
-// reason we import this — referenced via saveFilterIn fields elsewhere.
 var _ = textinput.New

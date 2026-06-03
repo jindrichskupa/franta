@@ -34,7 +34,6 @@ func TestAdaLovelaceDayKnownYears(t *testing.T) {
 }
 
 func TestAdaGreetingToday(t *testing.T) {
-	// 2026-10-13 is Ada Lovelace Day.
 	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
 	g := adaGreeting(now)
 	if !strings.Contains(g, "Dnes") {
@@ -43,7 +42,6 @@ func TestAdaGreetingToday(t *testing.T) {
 }
 
 func TestAdaGreetingTomorrow(t *testing.T) {
-	// 2026-10-12 is the day before ALD.
 	now := time.Date(2026, 10, 12, 23, 0, 0, 0, time.UTC)
 	g := adaGreeting(now)
 	if !strings.Contains(g, "Zítra") {
@@ -52,11 +50,10 @@ func TestAdaGreetingTomorrow(t *testing.T) {
 }
 
 func TestAdaGreetingOtherDays(t *testing.T) {
-	// A few non-ALD dates should produce no greeting.
 	cases := []time.Time{
 		time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
-		time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), // day after
-		time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC), // two days before
+		time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC),
 		time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC),
 	}
 	for _, now := range cases {
