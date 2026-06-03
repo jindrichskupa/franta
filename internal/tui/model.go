@@ -485,10 +485,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Error dialog is the top-most overlay — eats everything except quit and
 	// dismiss, so a failure can never be missed by drifting off the footer.
 	if m.errDialog != "" {
-		switch {
-		case msg.Type == tea.KeyCtrlC:
+		switch msg.Type {
+		case tea.KeyCtrlC:
 			return m, tea.Quit
-		case msg.Type == tea.KeyEsc, msg.Type == tea.KeyEnter, msg.Type == tea.KeySpace:
+		case tea.KeyEsc, tea.KeyEnter, tea.KeySpace:
 			m.errDialog = ""
 			return m, nil
 		}

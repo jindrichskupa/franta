@@ -29,10 +29,10 @@ func TestGlueDecodeAgainstFakeServer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 		switch target {
 		case "AWSGlue.GetRegistry":
-			fmt.Fprint(w, `{"RegistryName":"default","RegistryArn":"arn:aws:glue:us-east-1:000000000000:registry/default","Status":"AVAILABLE"}`)
+			_, _ = fmt.Fprint(w, `{"RegistryName":"default","RegistryArn":"arn:aws:glue:us-east-1:000000000000:registry/default","Status":"AVAILABLE"}`)
 		case "AWSGlue.GetSchemaVersion":
 			esc, _ := json.Marshal(schemaText)
-			fmt.Fprintf(w, `{"SchemaVersionId":%q,"SchemaDefinition":%s,"DataFormat":"AVRO","Status":"AVAILABLE"}`, uuid, esc)
+			_, _ = fmt.Fprintf(w, `{"SchemaVersionId":%q,"SchemaDefinition":%s,"DataFormat":"AVRO","Status":"AVAILABLE"}`, uuid, esc)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

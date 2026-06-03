@@ -75,8 +75,8 @@ func TestDecompressIfZlibPlain(t *testing.T) {
 func TestDecompressIfZlibZlibRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	w := zlib.NewWriter(&buf)
-	w.Write([]byte("world"))
-	w.Close()
+	_, _ = w.Write([]byte("world"))
+	_ = w.Close()
 	got, err := decompressIfZlib(0x05, buf.Bytes())
 	if err != nil || string(got) != "world" {
 		t.Fatalf("zlib = %q, %v", got, err)

@@ -270,15 +270,6 @@ func shortState(s string) string {
 	}
 }
 
-// renderGroupList is kept for tests / non-windowed callers.
-func renderGroupList(groups []kafka.GroupInfo, cursor int) string {
-	filtered := make([]int, len(groups))
-	for i := range groups {
-		filtered[i] = i
-	}
-	return renderGroupListWindowed(groups, filtered, cursor, len(groups), 40, nil)
-}
-
 func renderGroupDetail(d *kafka.GroupDetail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "State:     %s\n", d.State)

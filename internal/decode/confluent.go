@@ -77,7 +77,7 @@ func pingSR(url, username, password string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return nil
 }
 

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Pre-commit hook for franta. Runs the same checks the CI runs (gofmt, vet,
+# build, test, golangci-lint) so red builds get caught locally before push.
+#
+# Install:    ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+# Skip once:  git commit --no-verify
+set -euo pipefail
+
+# Move to repo root so commands work no matter where git invokes us.
+cd "$(git rev-parse --show-toplevel)"
+
+err() { printf '\033[0;31m✗ %s\033[0m\n' "$*" >&2; }
+ok()  { printf '\033[0;32m✓ %s\033[0m\n' "$*"; }
+say() { printf '\033[1;34m▸ %s\033[0m\n' "$*"; }
+
+# Only block on issues in files staged for this commit so the hook stays fast.
+staged_go=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.go$' || true)
+
+if [ -z "$staged_go" ]; then
+  ok "no .go files staged — skipping Go checks"
+  exit 0
+fi
+
+say "gofmt"
+unformatted=$(gofmt -l $staged_go || true)
+if [ -n "$unformatted" ]; then
+  err "gofmt needed on:"
+  echo "$unformatted"
+  err "run: gofmt -w $unformatted"
+  exit 1
+fi
+ok "gofmt"
+
+say "go vet ./..."
+if ! go vet ./...; then
+  err "go vet failed"
+  exit 1
+fi
+ok "go vet"
+
+say "go build ./..."
+if ! go build ./...; then
+  err "build failed"
+  exit 1
+fi
+ok "build"
+
+say "go test ./..."
+if ! go test -count=1 ./...; then
+  err "tests failed"
+  exit 1
+fi
+ok "tests"
+
+if command -v golangci-lint >/dev/null 2>&1; then
+  say "golangci-lint"
+  if ! golangci-lint run --timeout=5m; then
+    err "lint failed"
+    exit 1
+  fi
+  ok "lint"
+else
+  printf '\033[0;33m! golangci-lint not installed; skipping (brew install golangci-lint)\033[0m\n' >&2
+fi
+
+ok "pre-commit checks passed"

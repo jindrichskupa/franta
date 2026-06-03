@@ -275,14 +275,6 @@ func seekGen(ctx context.Context, cons *kafka.Consumer, s kafka.StartSpec) (int6
 	return cons.Gen(), nil
 }
 
-// switchGen switches topic and returns the new generation.
-func switchGen(ctx context.Context, cons *kafka.Consumer, topic string) (int64, error) {
-	if err := cons.SwitchTopic(ctx, topic); err != nil {
-		return 0, err
-	}
-	return cons.Gen(), nil
-}
-
 func runConsume(args []string) error {
 	fs := flag.NewFlagSet("consume", flag.ExitOnError)
 	cfgPath := fs.String("config", config.DefaultPath(), "path to config file")

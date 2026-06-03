@@ -56,7 +56,7 @@ func decompressIfZlib(compression byte, body []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("zlib reader: %w", err)
 		}
-		defer r.Close()
+		defer func() { _ = r.Close() }()
 		out, err := io.ReadAll(r)
 		if err != nil {
 			return nil, fmt.Errorf("zlib decompress: %w", err)

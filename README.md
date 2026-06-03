@@ -385,6 +385,15 @@ an RFC3339 string or epoch-millis number. `matches` uses RE2 (Go `regexp`).
 
 ## Development
 
+### Pre-commit hook
+
+```bash
+ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+```
+
+Runs gofmt, `go vet`, `go build`, `go test`, and `golangci-lint` against
+staged `.go` files. Skip once with `git commit --no-verify`.
+
 ```bash
 go test ./...                                              # unit tests
 go test -tags=integration ./...                            # round-trip via redpanda (needs Docker)
