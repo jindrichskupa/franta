@@ -122,3 +122,73 @@ func mustProduce(t *testing.T, ctx context.Context, p *Producer, topic string, n
 		}
 	}
 }
+
+func TestCreateDeleteTopic(t *testing.T) {
+	ctx := context.Background()
+	cl, adm := newIntegrationClient(t)
+	name := "admin-cd"
+	if err := CreateTopic(ctx, cl, name, 3, 1, map[string]string{"cleanup.policy": "compact"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	td, err := adm.ListTopics(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := td[name]; !ok || len(d.Partitions) != 3 {
+		t.Fatalf("topic not created with 3 partitions: %+v", td[name])
+	}
+	if err := DeleteTopic(ctx, cl, name); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+}
+
+func TestAddPartitions(t *testing.T) {
+	ctx := context.Background()
+	cl, adm := newIntegrationClient(t)
+	name := "admin-ap"
+	if err := CreateTopic(ctx, cl, name, 2, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := AddPartitions(ctx, cl, name, 4); err != nil {
+		t.Fatalf("add partitions: %v", err)
+	}
+	td, _ := adm.ListTopics(ctx, name)
+	if len(td[name].Partitions) != 4 {
+		t.Fatalf("want 4 partitions, got %d", len(td[name].Partitions))
+	}
+	// Reducing must fail.
+	if err := AddPartitions(ctx, cl, name, 1); err == nil {
+		t.Fatal("reducing partitions should error")
+	}
+}
+
+func TestGetSetTopicConfig(t *testing.T) {
+	ctx := context.Background()
+	cl, _ := newIntegrationClient(t)
+	name := "admin-cfg"
+	if err := CreateTopic(ctx, cl, name, 1, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetTopicConfig(ctx, cl, name, map[string]string{"retention.ms": "1234000"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	entries, err := GetTopicConfig(ctx, cl, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Key == "retention.ms" {
+			found = true
+			if e.Value != "1234000" {
+				t.Fatalf("retention.ms = %q", e.Value)
+			}
+			if !e.Editable {
+				t.Fatal("dynamic config should be Editable")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("retention.ms not returned")
+	}
+}

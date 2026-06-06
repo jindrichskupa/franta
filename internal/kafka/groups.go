@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -216,4 +217,113 @@ func memberAssignments(m kadm.DescribedGroupMember) []string {
 		}
 	}
 	return out
+}
+
+// ResetKind selects how ResetGroupOffsets computes target offsets.
+type ResetKind int
+
+const (
+	ResetBeginning ResetKind = iota
+	ResetEnd
+	ResetTimestamp
+	ResetExplicit
+)
+
+// ResetSpec describes an offset reset for a consumer group.
+type ResetSpec struct {
+	Kind    ResetKind
+	At      time.Time                  // for ResetTimestamp (UTC)
+	Offsets map[string]map[int32]int64 // for ResetExplicit: topic→partition→offset
+}
+
+// ResetGroupOffsets commits new offsets for a consumer group. For
+// Beginning/End/Timestamp it learns the group's committed topic-partitions and
+// resolves targets via the broker; Timestamp falls back to the end offset for
+// partitions with no record after At. For Explicit it commits the provided
+// offsets verbatim. The group must be empty (no active members) or the broker
+// rejects the commit; that error is returned to the caller.
+func ResetGroupOffsets(ctx context.Context, cl *kgo.Client, group string, spec ResetSpec) error {
+	adm := kadm.NewClient(cl)
+	var target kadm.Offsets
+
+	if spec.Kind == ResetExplicit {
+		for topic, parts := range spec.Offsets {
+			for p, off := range parts {
+				target.AddOffset(topic, p, off, -1)
+			}
+		}
+		if len(target) == 0 {
+			return fmt.Errorf("no offsets to reset")
+		}
+	} else {
+		committed, err := adm.FetchOffsets(ctx, group)
+		if err != nil {
+			return err
+		}
+		if err := committed.Error(); err != nil {
+			return err
+		}
+		topics := committed.Partitions().Topics()
+		if len(topics) == 0 {
+			return fmt.Errorf("group %q has no committed offsets to reset", group)
+		}
+		var listed kadm.ListedOffsets
+		switch spec.Kind {
+		case ResetBeginning:
+			listed, err = adm.ListStartOffsets(ctx, topics...)
+		case ResetEnd:
+			listed, err = adm.ListEndOffsets(ctx, topics...)
+		case ResetTimestamp:
+			listed, err = adm.ListOffsetsAfterMilli(ctx, spec.At.UnixMilli(), topics...)
+		default:
+			return fmt.Errorf("unknown reset kind %d", spec.Kind)
+		}
+		if err != nil {
+			return err
+		}
+		if err := listed.Error(); err != nil {
+			return err
+		}
+		var ends kadm.ListedOffsets
+		if spec.Kind == ResetTimestamp {
+			ends, _ = adm.ListEndOffsets(ctx, topics...)
+		}
+		committed.Each(func(o kadm.OffsetResponse) {
+			if o.Err != nil {
+				return
+			}
+			off := int64(-1)
+			if lo, ok := listed.Lookup(o.Topic, o.Partition); ok && lo.Offset >= 0 {
+				off = lo.Offset
+			} else if spec.Kind == ResetTimestamp {
+				if e, ok := ends.Lookup(o.Topic, o.Partition); ok && e.Offset >= 0 {
+					off = e.Offset
+				}
+			}
+			if off < 0 {
+				return
+			}
+			target.AddOffset(o.Topic, o.Partition, off, -1)
+		})
+		if len(target) == 0 {
+			return fmt.Errorf("no resolvable offsets for the requested position")
+		}
+	}
+
+	resp, err := adm.CommitOffsets(ctx, group, target)
+	if err != nil {
+		return err
+	}
+	return resp.Error()
+}
+
+// DeleteGroup deletes a consumer group. The broker rejects deletion of a group
+// with active members; that error is returned.
+func DeleteGroup(ctx context.Context, cl *kgo.Client, name string) error {
+	adm := kadm.NewClient(cl)
+	resp, err := adm.DeleteGroups(ctx, name)
+	if err != nil {
+		return err
+	}
+	return resp.Error()
 }

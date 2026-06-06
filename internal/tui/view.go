@@ -23,6 +23,18 @@ func (m Model) View() string {
 	if m.errDialog != "" {
 		return m.errorDialogView()
 	}
+	if m.confirmActive {
+		return m.confirmView()
+	}
+	if m.ntActive {
+		return m.createTopicView()
+	}
+	if m.apActive {
+		return m.addPartitionsView()
+	}
+	if m.tcActive {
+		return m.topicConfigView()
+	}
 	if m.pickingFilter {
 		return m.filterPickerView()
 	}
@@ -33,7 +45,18 @@ func (m Model) View() string {
 	case modeProducer:
 		return m.producerView()
 	case modeGroups:
+		if m.resetActive {
+			return m.resetPickerView()
+		}
+		if m.resetTSActive {
+			return m.resetTSView()
+		}
+		if m.explicitActive {
+			return m.explicitView()
+		}
 		return m.groupsView()
+	case modeExport:
+		return m.exportView()
 	}
 	return m.normalView()
 }
@@ -94,11 +117,15 @@ const helpText = `franta — keys
   F                   recall a saved filter (picker; d deletes)
   ctrl+s              in filter editor: save the current query under a name
   i / r               topics: toggle internal / reload
+  n / D / a / c       topics: new / delete / add-partitions / config (modals)
   s                   seek prompt (modal): end | beginning | last:N | 1h | RFC3339
   p                   produce form (modal): topic, key, headers (k=v,k=v), value (textarea)
                       ctrl+s sends; enter inserts a newline while in value
   P                   produce with TEMPLATE: prefill from the currently
                       selected record (topic/key/headers/value)
+  y / Y / ctrl+y      copy key / value / record JSON
+  e                   export filtered buffer (modal): JSONL / JSON array / CSV;
+                      tab cycles format; ctrl+s writes; esc cancel
   g                   consumer groups (modal): list left, lag+members right;
                       cursor auto-syncs detail; r refresh; esc back
   space               pause / resume tailing (records keep buffering)
@@ -363,11 +390,11 @@ func (m Model) normalFooter() string {
 	var hint string
 	switch m.paneFocus {
 	case paneTopics:
-		hint = "↑/↓ nav  enter switch  / search  o sort  i internal  r reload  •  1/2/3 t tab focus  •  space pause  •  s p P g  •  ? help  q quit"
+		hint = "↑/↓ nav  enter switch  / search  o sort  i internal  r reload  •  n new  D del  a parts  c config  •  1/2/3 t tab focus  •  space pause  •  s p P g e  •  ? help  q quit"
 	case paneDetail:
-		hint = "↑/↓/pgup/pgdn scroll  •  1/2/3 t tab focus  •  P produce-template  •  space pause  •  s p g  •  ? help  q quit"
+		hint = "↑/↓/pgup/pgdn scroll  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  P produce-template  •  space pause  •  s p g e  •  ? help  q quit"
 	default:
-		hint = "↑/↓ nav  / f filter (e.g. header['src'] == \"web\")  •  P produce-template  •  1/2/3 t tab focus  •  space pause  •  s p g  •  ? help  q quit"
+		hint = "↑/↓ nav  / f filter (e.g. header['src'] == \"web\")  •  P produce-template  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  space pause  •  s p g e  •  ? help  q quit"
 	}
 	prefix := ""
 	if m.paused {

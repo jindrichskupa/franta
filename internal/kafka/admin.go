@@ -9,6 +9,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
 // TopicInfo summarizes a topic for the picker.
@@ -164,4 +165,100 @@ func offsetsToMap(lo kadm.ListedOffsets) (map[string]map[int32]int64, error) {
 		out[topic] = m
 	}
 	return out, firstErr
+}
+
+// CreateTopic creates a topic with the given partition count, replication
+// factor, and optional configs. Use -1 for partitions/rf to accept broker
+// defaults (Kafka 2.4+).
+func CreateTopic(ctx context.Context, cl *kgo.Client, name string, partitions int32, rf int16, configs map[string]string) error {
+	adm := kadm.NewClient(cl)
+	var cfg map[string]*string
+	if len(configs) > 0 {
+		cfg = make(map[string]*string, len(configs))
+		for k, v := range configs {
+			cfg[k] = kadm.StringPtr(v)
+		}
+	}
+	resp, err := adm.CreateTopics(ctx, partitions, rf, cfg, name)
+	if err != nil {
+		return err
+	}
+	return resp.Error()
+}
+
+// DeleteTopic deletes a topic by name.
+func DeleteTopic(ctx context.Context, cl *kgo.Client, name string) error {
+	adm := kadm.NewClient(cl)
+	resp, err := adm.DeleteTopics(ctx, name)
+	if err != nil {
+		return err
+	}
+	return resp.Error()
+}
+
+// AddPartitions raises a topic's partition count to total (must exceed the
+// current count; Kafka cannot reduce partitions).
+func AddPartitions(ctx context.Context, cl *kgo.Client, name string, total int) error {
+	adm := kadm.NewClient(cl)
+	resp, err := adm.UpdatePartitions(ctx, total, name)
+	if err != nil {
+		return err
+	}
+	return resp.Error()
+}
+
+// TopicConfigEntry is one topic config key for the config editor. Editable is
+// true for dynamic per-topic configs; default/static entries are read-only.
+type TopicConfigEntry struct {
+	Key      string
+	Value    string
+	Editable bool
+}
+
+// GetTopicConfig returns a topic's effective configs, sorted by key.
+func GetTopicConfig(ctx context.Context, cl *kgo.Client, name string) ([]TopicConfigEntry, error) {
+	adm := kadm.NewClient(cl)
+	rcs, err := adm.DescribeTopicConfigs(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := rcs.On(name, nil)
+	if err != nil {
+		return nil, err
+	}
+	if rc.Err != nil {
+		return nil, rc.Err
+	}
+	out := make([]TopicConfigEntry, 0, len(rc.Configs))
+	for _, c := range rc.Configs {
+		out = append(out, TopicConfigEntry{
+			Key:      c.Key,
+			Value:    c.MaybeValue(),
+			Editable: c.Source == kmsg.ConfigSourceDynamicTopicConfig,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
+
+// SetTopicConfig incrementally sets the given config keys on a topic. Keys not
+// in set are left unchanged.
+func SetTopicConfig(ctx context.Context, cl *kgo.Client, name string, set map[string]string) error {
+	if len(set) == 0 {
+		return nil
+	}
+	adm := kadm.NewClient(cl)
+	alters := make([]kadm.AlterConfig, 0, len(set))
+	for k, v := range set {
+		alters = append(alters, kadm.AlterConfig{Op: kadm.SetConfig, Name: k, Value: kadm.StringPtr(v)})
+	}
+	resp, err := adm.AlterTopicConfigs(ctx, alters, name)
+	if err != nil {
+		return err
+	}
+	r, err := resp.On(name, nil)
+	if err != nil {
+		return err
+	}
+	return r.Err
 }

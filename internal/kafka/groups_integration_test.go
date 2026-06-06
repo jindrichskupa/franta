@@ -99,3 +99,106 @@ func TestListAndDescribeGroup(t *testing.T) {
 		t.Fatalf("total lag = %d, want 3", d.TotalLag)
 	}
 }
+
+// newIntegrationClient starts a redpanda container and returns a connected
+// *kgo.Client plus a *kadm.Client wrapping it. The container is terminated when
+// the test finishes.
+func newIntegrationClient(t *testing.T) (*kgo.Client, *kadm.Client) {
+	t.Helper()
+	ctx := context.Background()
+	rp, err := redpanda.Run(ctx, "redpandadata/redpanda:latest")
+	if err != nil {
+		t.Fatalf("start redpanda: %v", err)
+	}
+	t.Cleanup(func() { _ = rp.Terminate(ctx) })
+
+	broker, err := rp.KafkaSeedBroker(ctx)
+	if err != nil {
+		t.Fatalf("seed broker: %v", err)
+	}
+	cl, err := kgo.NewClient(kgo.SeedBrokers(broker))
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	t.Cleanup(cl.Close)
+	return cl, kadm.NewClient(cl)
+}
+
+func TestResetGroupOffsetsBeginningEnd(t *testing.T) {
+	ctx := context.Background()
+	cl, adm := newIntegrationClient(t)
+	topic := "reset-be"
+	if _, err := adm.CreateTopics(ctx, 1, 1, nil, topic); err != nil {
+		t.Fatal(err)
+	}
+	group := "g-reset-be"
+	// Commit an arbitrary offset so the group has a committed topic-partition.
+	var os kadm.Offsets
+	os.AddOffset(topic, 0, 5, -1)
+	if _, err := adm.CommitOffsets(ctx, group, os); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ResetGroupOffsets(ctx, cl, group, ResetSpec{Kind: ResetBeginning}); err != nil {
+		t.Fatalf("reset beginning: %v", err)
+	}
+	got, _ := adm.FetchOffsets(ctx, group)
+	if o, ok := got.Lookup(topic, 0); !ok || o.At != 0 {
+		t.Fatalf("after beginning: %+v ok=%v", o, ok)
+	}
+
+	if err := ResetGroupOffsets(ctx, cl, group, ResetSpec{Kind: ResetEnd}); err != nil {
+		t.Fatalf("reset end: %v", err)
+	}
+	end, _ := adm.ListEndOffsets(ctx, topic)
+	eo, _ := end.Lookup(topic, 0)
+	got, _ = adm.FetchOffsets(ctx, group)
+	if o, _ := got.Lookup(topic, 0); o.At != eo.Offset {
+		t.Fatalf("after end: committed=%d end=%d", o.At, eo.Offset)
+	}
+}
+
+func TestResetGroupOffsetsExplicit(t *testing.T) {
+	ctx := context.Background()
+	cl, adm := newIntegrationClient(t)
+	topic := "reset-x"
+	if _, err := adm.CreateTopics(ctx, 1, 1, nil, topic); err != nil {
+		t.Fatal(err)
+	}
+	group := "g-reset-x"
+	var os kadm.Offsets
+	os.AddOffset(topic, 0, 1, -1)
+	if _, err := adm.CommitOffsets(ctx, group, os); err != nil {
+		t.Fatal(err)
+	}
+	spec := ResetSpec{Kind: ResetExplicit, Offsets: map[string]map[int32]int64{topic: {0: 3}}}
+	if err := ResetGroupOffsets(ctx, cl, group, spec); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := adm.FetchOffsets(ctx, group)
+	if o, _ := got.Lookup(topic, 0); o.At != 3 {
+		t.Fatalf("explicit: %d", o.At)
+	}
+}
+
+func TestDeleteGroup(t *testing.T) {
+	ctx := context.Background()
+	cl, adm := newIntegrationClient(t)
+	topic := "del-grp"
+	if _, err := adm.CreateTopics(ctx, 1, 1, nil, topic); err != nil {
+		t.Fatal(err)
+	}
+	group := "g-del"
+	var os kadm.Offsets
+	os.AddOffset(topic, 0, 1, -1)
+	if _, err := adm.CommitOffsets(ctx, group, os); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteGroup(ctx, cl, group); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	listed, _ := adm.ListGroups(ctx)
+	if _, ok := listed[group]; ok {
+		t.Fatal("group should be gone")
+	}
+}

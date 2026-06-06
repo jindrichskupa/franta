@@ -89,6 +89,16 @@ func wrapForVP(s string, w int) string {
 }
 
 func (m Model) updateGroups(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Reset/delete sub-dialogs take input before any list/search handling.
+	if m.resetActive {
+		return m.updateReset(msg)
+	}
+	if m.resetTSActive {
+		return m.updateResetTS(msg)
+	}
+	if m.explicitActive {
+		return m.updateExplicit(msg)
+	}
 	// Search input has priority when active (mirrors the topics pane).
 	if m.searchingGroup {
 		return m.updateGroupSearchPrompt(msg)
@@ -182,6 +192,10 @@ func (m Model) updateGroups(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		return m, m.reloadGroupsCmd()
+	case "R":
+		return m.beginReset()
+	case "D":
+		return m.beginDeleteGroup()
 	case "o":
 		// Cycle sort: name → lag↓ → members↓ → name. Re-apply filter to
 		// resort; cursor to top.
@@ -324,7 +338,7 @@ func (m Model) groupsView() string {
 	if m.searchingGroup {
 		footer = m.groupSearchPanel()
 	} else {
-		hint := "↑/↓ pgup/pgdn home/end nav  •  tab/1/2 switch pane  •  / search  •  o sort  •  r reload  •  esc back  •  q quit"
+		hint := "↑/↓ pgup/pgdn home/end nav  •  tab/1/2 switch pane  •  / search  •  o sort  •  R reset  •  D delete  •  r reload  •  esc back  •  q quit"
 		prefix := ""
 		if m.groupSearch != "" {
 			prefix = fmt.Sprintf("[search: %s  %d/%d] ", m.groupSearch, len(m.filteredGroups), len(m.groups))

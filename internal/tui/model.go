@@ -3,9 +3,12 @@ package tui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -23,6 +26,7 @@ const (
 	modeNormal viewMode = iota
 	modeProducer
 	modeGroups
+	modeExport
 )
 
 // sortMode is the cycling sort order for the topics and groups lists. The
@@ -106,6 +110,7 @@ type Model struct {
 	status    string
 	errDialog string // non-empty → modal error overlay; dismissed by any key
 	produce   ProduceFunc
+	copyFn    CopyFunc
 
 	table   table.Model
 	detail  viewport.Model
@@ -166,6 +171,13 @@ type Model struct {
 	listGroupsFn       GroupsFunc
 	groupLagsFn        GroupLagsFunc
 	describeGroupFn    DescribeGroupFunc
+	resetOffsetsFn     ResetOffsetsFunc
+	deleteGroupFn      DeleteGroupFunc
+	createTopicFn      CreateTopicFunc
+	deleteTopicFn      DeleteTopicFunc
+	addPartitionsFn    AddPartitionsFunc
+	getTopicConfigFn   GetTopicConfigFunc
+	setTopicConfigFn   SetTopicConfigFunc
 	groupLoadGen       int64 // bumped on every reload; stale phase-2 msgs dropped
 	groupsLoading      bool
 	groupSort          sortMode
@@ -185,6 +197,54 @@ type Model struct {
 
 	// groupsPane focus: false = list (left), true = detail (right). Tab toggles.
 	groupDetailFocused bool
+
+	// Generic confirm overlay (reused by group + topic destructive actions).
+	confirmActive bool
+	confirmPrompt string
+	confirmExpect string          // "" → y/n mode; else type-to-confirm value
+	confirmInput  textinput.Model // used only in type-to-confirm mode
+	confirmAction func() tea.Cmd  // executed on confirm
+
+	// Reset-offset dialog state (within modeGroups).
+	resetActive   bool // target picker open
+	resetCursor   int  // 0=begin 1=end 2=timestamp 3=explicit
+	resetGroup    string
+	resetTSActive bool // timestamp text input open
+	resetTSInput  textinput.Model
+
+	// Explicit per-partition offset editor (within modeGroups reset flow).
+	explicitActive bool
+	explicitRows   []explicitRow
+	explicitCursor int
+	explicitInput  textinput.Model
+
+	// Export dialog state.
+	exportPath       textinput.Model
+	exportFmt        exportFormat
+	exportN          int  // record count captured when the dialog opened
+	exportPathEdited bool // user typed in the path field → stop auto-deriving it
+	openFn           func(path string) (io.WriteCloser, error)
+
+	// Add-partitions prompt.
+	apActive  bool
+	apInput   textinput.Model
+	apTopic   string
+	apCurrent int
+
+	// New-topic dialog.
+	ntActive    bool
+	ntInputs    []textinput.Model // 0=name 1=partitions 2=replication
+	ntConfigsTA textarea.Model
+	ntFocus     int
+
+	// Topic config editor.
+	tcActive  bool
+	tcTopic   string
+	tcRows    []tcRow
+	tcOrig    map[string]string // key → original value (changed-detection)
+	tcCursor  int
+	tcInput   textinput.Model
+	tcLoading bool
 }
 
 // New builds a Model. produce may be nil (producing disabled).
@@ -224,6 +284,10 @@ func New(produce ProduceFunc) Model {
 		prodHeadersTA: prodHeadersTA,
 		prodValueTA:   prodValueTA,
 	}
+	// Default clipboard writer; Run() overrides only when a Copy callback is set.
+	model.copyFn = clipboard.WriteAll
+	// Default file opener for the export dialog; tests inject their own.
+	model.openFn = func(p string) (io.WriteCloser, error) { return os.Create(p) }
 	return model
 }
 
@@ -249,6 +313,17 @@ func (m Model) visible() []record.Record {
 		}
 	}
 	return out
+}
+
+// selectedRecord returns the record under the messages-table cursor within the
+// current visible (filtered) set, and false if there is none.
+func (m Model) selectedRecord() (record.Record, bool) {
+	vis := m.visible()
+	idx := m.table.Cursor()
+	if idx < 0 || idx >= len(vis) {
+		return record.Record{}, false
+	}
+	return vis[idx], true
 }
 
 // refreshTable rebuilds table rows from the visible records.
@@ -320,6 +395,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errDialog = "Produce failed\n\n" + msg.err.Error()
 		} else {
 			m.status = "produced"
+			m.mode = modeNormal
+		}
+		return m, nil
+
+	case exportDoneMsg:
+		if msg.err != nil {
+			m.errDialog = "Export failed\n\n" + msg.err.Error()
+		} else {
+			m.status = fmt.Sprintf("exported %d → %s", msg.n, msg.path)
 			m.mode = modeNormal
 		}
 		return m, nil
@@ -467,6 +551,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case groupMutatedMsg:
+		if msg.err != nil {
+			m.errDialog = fmt.Sprintf("%s group failed\n\n%s", capitalize(msg.action), msg.err.Error())
+			return m, nil
+		}
+		m.status = fmt.Sprintf("%s group %s", msg.action, msg.group)
+		// Refresh the groups list + detail after a successful mutation.
+		return m, m.reloadGroupsCmd()
+
+	case topicMutatedMsg:
+		if msg.err != nil {
+			m.errDialog = fmt.Sprintf("%s topic failed\n\n%s", capitalize(msg.action), msg.err.Error())
+			return m, nil
+		}
+		m.status = fmt.Sprintf("%s topic %s", msg.action, msg.topic)
+		return m, m.reloadTopicsCmd()
+
+	case topicConfigLoadedMsg:
+		if msg.topic != m.tcTopic || !m.tcActive {
+			return m, nil // superseded
+		}
+		m.tcLoading = false
+		if msg.err != nil {
+			m.tcActive = false
+			m.errDialog = "Load config failed\n\n" + msg.err.Error()
+			return m, nil
+		}
+		m.tcRows = msg.rows
+		m.tcOrig = msg.orig
+		m.tcCursor = 0
+		in := textinput.New()
+		in.Prompt = ""
+		m.tcInput = in
+		m.tcLoadRowToInput()
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -498,6 +618,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.confirmActive {
+		return m.updateConfirm(msg)
+	}
+
+	if m.ntActive {
+		return m.updateCreateTopic(msg)
+	}
+	if m.apActive {
+		return m.updateAddPartitions(msg)
+	}
+	if m.tcActive {
+		return m.updateTopicConfig(msg)
+	}
+
 	// Help overlay swallows everything except its own close keys.
 	if m.showHelp {
 		switch {
@@ -516,6 +650,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateProducer(msg)
 	case modeGroups:
 		return m.updateGroups(msg)
+	case modeExport:
+		return m.updateExport(msg)
 	}
 
 	// modeNormal — text-input subscreens first (they swallow most keys).
@@ -533,6 +669,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+	case tea.KeyCtrlY:
+		if r, ok := m.selectedRecord(); ok {
+			b, err := record.JSON(r)
+			if err != nil {
+				m.errDialog = "clipboard: " + err.Error()
+			} else if err := m.copyFn(string(b)); err != nil {
+				m.errDialog = "clipboard: " + err.Error()
+			} else {
+				m.status = "copied record"
+			}
+		} else {
+			m.status = "nothing to copy"
+		}
+		return m, nil
 	case tea.KeyTab:
 		m.paneFocus = nextPane(m.paneFocus, +1)
 		return m, nil
@@ -583,6 +733,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pickingFilter = true
 		m.filterPickCursor = 0
 		return m, nil
+	case "e":
+		m = m.openExport()
+		return m, nil
 	case "p":
 		if m.produce != nil {
 			m = m.openProducer()
@@ -592,13 +745,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Produce with template: prefill from the currently-selected record
 		// in the messages buffer (whatever pane is focused).
 		if m.produce != nil {
-			vis := m.visible()
-			idx := m.table.Cursor()
-			if idx >= 0 && idx < len(vis) {
-				m = m.openProducerTemplate(vis[idx])
+			if r, ok := m.selectedRecord(); ok {
+				m = m.openProducerTemplate(r)
 			} else {
 				m = m.openProducer()
 			}
+		}
+		return m, nil
+	case "y":
+		if r, ok := m.selectedRecord(); ok {
+			if err := m.copyFn(r.KeyDisplay()); err != nil {
+				m.errDialog = "clipboard: " + err.Error()
+			} else {
+				m.status = "copied key"
+			}
+		} else {
+			m.status = "nothing to copy"
+		}
+		return m, nil
+	case "Y":
+		if r, ok := m.selectedRecord(); ok {
+			if err := m.copyFn(r.ValueDisplay()); err != nil {
+				m.errDialog = "clipboard: " + err.Error()
+			} else {
+				m.status = "copied value"
+			}
+		} else {
+			m.status = "nothing to copy"
 		}
 		return m, nil
 	case "g":
@@ -833,6 +1006,14 @@ func (m Model) updateTopicsPane(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.searchingTopic = true
 		return m, nil
+	case "n":
+		return m.beginCreateTopic()
+	case "D":
+		return m.beginDeleteTopic()
+	case "a":
+		return m.beginAddPartitions()
+	case "c":
+		return m.beginTopicConfig()
 	case "i":
 		if m.listTopics == nil {
 			return m, nil

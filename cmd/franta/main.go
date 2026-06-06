@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/atotto/clipboard"
+
 	"franta/internal/config"
 	"franta/internal/decode"
 	"franta/internal/kafka"
@@ -249,6 +251,25 @@ func runTUI(args []string) error {
 		DescribeGroup: func(n string) (kafka.GroupDetail, error) {
 			return kafka.DescribeGroup(ctx, consClient, n)
 		},
+		ResetOffsets: func(g string, spec kafka.ResetSpec) error {
+			return kafka.ResetGroupOffsets(ctx, consClient, g, spec)
+		},
+		DeleteGroup: func(g string) error {
+			return kafka.DeleteGroup(ctx, consClient, g)
+		},
+		CreateTopic: func(name string, p int32, rf int16, cfg map[string]string) error {
+			return kafka.CreateTopic(ctx, consClient, name, p, rf, cfg)
+		},
+		DeleteTopic: func(name string) error { return kafka.DeleteTopic(ctx, consClient, name) },
+		AddPartitions: func(name string, total int) error {
+			return kafka.AddPartitions(ctx, consClient, name, total)
+		},
+		GetTopicConfig: func(name string) ([]kafka.TopicConfigEntry, error) {
+			return kafka.GetTopicConfig(ctx, consClient, name)
+		},
+		SetTopicConfig: func(name string, set map[string]string) error {
+			return kafka.SetTopicConfig(ctx, consClient, name, set)
+		},
 		Cluster: name,
 		Topic:   topic,
 		SavedFilters: func() []tui.SavedFilter {
@@ -264,6 +285,7 @@ func runTUI(args []string) error {
 		DeleteFilter: func(n string) error {
 			return config.DeleteFilter(filtersPath, n)
 		},
+		Copy: func(s string) error { return clipboard.WriteAll(s) },
 	})
 }
 
@@ -377,12 +399,7 @@ func runConsume(args []string) error {
 		if !pred(r) {
 			continue
 		}
-		_ = enc.Encode(struct {
-			Partition int32  `json:"partition"`
-			Offset    int64  `json:"offset"`
-			Key       string `json:"key"`
-			Value     string `json:"value"`
-		}{r.Partition, r.Offset, string(r.Key), r.ValueDisplay()})
+		_ = enc.Encode(record.ToWire(r))
 	}
 	return nil
 }
