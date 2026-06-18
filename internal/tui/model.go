@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"franta/internal/jsontree"
 	"franta/internal/kafka"
 	"franta/internal/query"
 	"franta/internal/record"
@@ -116,6 +117,16 @@ type Model struct {
 	detail  viewport.Model
 	queryIn textinput.Model
 
+	// JSON tree detail view. detailRaw (toggled by 'v', persists across
+	// records) forces the raw viewport; otherwise a JSON value is shown as a
+	// foldable tree. detailRecKey detects selection changes so the tree
+	// rebuilds (cursor + fold reset) only when the record actually changes.
+	detailRaw        bool
+	detailTree       *jsontree.Node
+	detailRows       []jsontree.Row
+	detailTreeCursor int
+	detailRecKey     string
+
 	filtering bool // query bar focused
 
 	// Saved filter state. savedFilters is the loaded list (config.yaml inline
@@ -130,6 +141,12 @@ type Model struct {
 	savingFilter   bool
 	saveFilterIn   textinput.Model
 	pendingSaveQry string // captured at ctrl+s so refreshes don't drop it
+
+	// Cluster picker (C).
+	clusters          []string
+	pickingCluster    bool
+	clusterPickCursor int
+	switchClusterFn   SwitchClusterFunc
 
 	// live re-seek
 	seek    SeekFunc
@@ -390,6 +407,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case clusterSwitchedMsg:
+		if msg.err != nil {
+			m.errDialog = "Switch cluster failed\n\n" + msg.err.Error()
+			return m, nil
+		}
+		m.cluster = msg.cluster
+		m.curGen = msg.gen
+		m.topicLoadGen++
+		m.groupLoadGen++
+		m.buf = record.NewBuffer(bufferCap)
+		m.topics = nil
+		m.groups = nil
+		m.groupDetails = nil
+		m.pred, _ = query.Parse("") // match-all; m.pred is called unguarded in visible(), never set it nil
+		m.queryIn.SetValue("")
+		m.topic = ""
+		m.topicCursor = 0
+		m.mode = modeNormal
+		m.paneFocus = paneTopics
+		m.topicsLoading = true
+		m.refreshTable()
+		m.refreshDetail()
+		m.status = "switched to " + msg.cluster
+		return m, m.loadTopicsCmd()
+
 	case producedMsg:
 		if msg.err != nil {
 			m.errDialog = "Produce failed\n\n" + msg.err.Error()
@@ -602,6 +644,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.pickingFilter {
 		return m.updateFilterPicker(msg)
 	}
+	if m.pickingCluster {
+		return m.updateClusterPicker(msg)
+	}
 	// Error dialog is the top-most overlay — eats everything except quit and
 	// dismiss, so a failure can never be missed by drifting off the footer.
 	if m.errDialog != "" {
@@ -784,6 +829,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.groupsLoading = true
 			return m, m.loadGroupsCmd()
 		}
+		return m, nil
+	case "C":
+		m = m.openClusterPicker()
 		return m, nil
 	}
 
@@ -1062,6 +1110,15 @@ func (m Model) updateMessagesPane(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateDetailPane handles keys while the detail pane has focus.
 func (m Model) updateDetailPane(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// 'v' toggles raw/tree in either sub-mode.
+	if msg.String() == "v" {
+		return m.toggleDetailRaw(), nil
+	}
+	// Tree sub-mode: node navigation + folding.
+	if !m.detailRaw && m.detailTree != nil {
+		return m.updateDetailTree(msg), nil
+	}
+	// Raw sub-mode: viewport scroll (unchanged).
 	var cmd tea.Cmd
 	m.detail, cmd = m.detail.Update(msg)
 	return m, cmd
@@ -1174,8 +1231,38 @@ func (m *Model) refreshDetail() {
 	if idx < 0 || idx >= len(vis) {
 		m.detail.SetContent("")
 		m.detail.GotoTop()
+		m.detailTree = nil
+		m.detailRows = nil
+		m.detailRecKey = ""
 		return
 	}
-	m.detail.SetContent(detailContent(vis[idx]))
-	m.detail.GotoTop()
+	r := vis[idx]
+	key := recKey(r)
+	changed := key != m.detailRecKey
+	m.detailRecKey = key
+
+	// Raw viewport is always kept current so 'v' can switch to it instantly.
+	m.detail.SetContent(detailContent(r))
+	if changed {
+		m.detail.GotoTop()
+	}
+
+	// Tree: rebuild (resetting cursor + fold state) only when the selection
+	// changed, so streamed records for the same selection don't disturb folds.
+	// A non-JSON value leaves detailTree nil → the view falls back to raw.
+	if m.detailRaw {
+		m.detailTree = nil
+		m.detailRows = nil
+		return
+	}
+	if changed {
+		if root, err := jsontree.Parse([]byte(r.ValueDisplay())); err == nil {
+			m.detailTree = root
+			m.detailRows = root.Rows()
+			m.detailTreeCursor = 0
+		} else {
+			m.detailTree = nil
+			m.detailRows = nil
+		}
+	}
 }

@@ -38,6 +38,9 @@ func (m Model) View() string {
 	if m.pickingFilter {
 		return m.filterPickerView()
 	}
+	if m.pickingCluster {
+		return m.clusterPickerView()
+	}
 	if m.showHelp {
 		return m.helpView()
 	}
@@ -123,11 +126,14 @@ const helpText = `franta — keys
                       ctrl+s sends; enter inserts a newline while in value
   P                   produce with TEMPLATE: prefill from the currently
                       selected record (topic/key/headers/value)
+  v                   detail pane: toggle JSON tree / raw view
+                      in tree: ↑↓ nav · enter fold · ←/→ collapse/expand · home/end
   y / Y / ctrl+y      copy key / value / record JSON
   e                   export filtered buffer (modal): JSONL / JSON array / CSV;
                       tab cycles format; ctrl+s writes; esc cancel
   g                   consumer groups (modal): list left, lag+members right;
                       cursor auto-syncs detail; r refresh; esc back
+  C                   switch cluster (picker; live re-wire, resets to topics)
   space               pause / resume tailing (records keep buffering)
   esc                 cancel a prompt or close a modal
   ?                   toggle this help
@@ -188,8 +194,14 @@ func (m Model) normalView() string {
 		m.topicsPaneContent(leftW-2)
 	msgsContent := paneTitle("messages", m.paneFocus == paneMessages) + "\n" +
 		m.table.View()
+	detailBody := m.detail.View()
+	if !m.detailRaw && m.detailTree != nil {
+		// -3 = border (2) + title row (1) — matches the viewport height set in
+		// the WindowSizeMsg handler.
+		detailBody = m.detailTreeView(detailH - 3)
+	}
 	detailContentStr := paneTitle("detail", m.paneFocus == paneDetail) + "\n" +
-		m.detail.View()
+		detailBody
 
 	topicsBox := paneStyle(m.paneFocus == paneTopics).
 		Width(leftW - 2).Height(msgsH + detailH - 2).
@@ -218,7 +230,11 @@ func (m Model) narrowOrShortView() string {
 	case paneTopics:
 		body = m.topicsPaneContent(m.width - 2)
 	case paneDetail:
-		body = m.detail.View()
+		if !m.detailRaw && m.detailTree != nil {
+			body = m.detailTreeView(m.height - 4)
+		} else {
+			body = m.detail.View()
+		}
 	default:
 		body = m.table.View()
 	}
@@ -390,11 +406,15 @@ func (m Model) normalFooter() string {
 	var hint string
 	switch m.paneFocus {
 	case paneTopics:
-		hint = "↑/↓ nav  enter switch  / search  o sort  i internal  r reload  •  n new  D del  a parts  c config  •  1/2/3 t tab focus  •  space pause  •  s p P g e  •  ? help  q quit"
+		hint = "↑/↓ nav  enter switch  / search  o sort  i internal  r reload  •  n new  D del  a parts  c config  •  1/2/3 t tab focus  •  space pause  •  s p P g e  •  C cluster  •  ? help  q quit"
 	case paneDetail:
-		hint = "↑/↓/pgup/pgdn scroll  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  P produce-template  •  space pause  •  s p g e  •  ? help  q quit"
+		if !m.detailRaw && m.detailTree != nil {
+			hint = "↑/↓ nav  enter fold  ←/→ collapse/expand  home/end top/bottom  •  v raw  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  ? help  q quit"
+		} else {
+			hint = "↑/↓/pgup/pgdn scroll  •  v tree  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  P produce-template  •  space pause  •  s p g e  •  C cluster  •  ? help  q quit"
+		}
 	default:
-		hint = "↑/↓ nav  / f filter (e.g. header['src'] == \"web\")  •  P produce-template  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  space pause  •  s p g e  •  ? help  q quit"
+		hint = "↑/↓ nav  / f filter (e.g. header['src'] == \"web\")  •  P produce-template  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  space pause  •  s p g e  •  C cluster  •  ? help  q quit"
 	}
 	prefix := ""
 	if m.paused {
@@ -439,7 +459,10 @@ func (m Model) filterPanel() string {
 	return m.queryIn.View() + "  " + parseStatus + "\n" + hint + "\n" + help
 }
 
-func detailContent(r record.Record) string {
+// detailMetaBlock renders the fixed metadata + headers block (no value). Shared
+// between the raw detail content and the JSON tree view so both show an
+// identical top block. The returned string ends with a trailing newline.
+func detailMetaBlock(r record.Record) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "topic:     %s\n", r.Topic)
 	fmt.Fprintf(&b, "partition: %d\n", r.Partition)
@@ -456,9 +479,11 @@ func detailContent(r record.Record) string {
 			fmt.Fprintf(&b, "  %s = %s\n", h.Key, string(h.Value))
 		}
 	}
-	b.WriteString("\nvalue:\n")
-	b.WriteString(r.ValueDisplay())
 	return b.String()
+}
+
+func detailContent(r record.Record) string {
+	return detailMetaBlock(r) + "\nvalue:\n" + r.ValueDisplay()
 }
 
 func itoa32(v int32) string { return strconv.FormatInt(int64(v), 10) }
