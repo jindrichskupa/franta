@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -120,6 +121,30 @@ func TestNonJSONStaysRaw(t *testing.T) {
 	}
 	if m.status != "value is not JSON" {
 		t.Fatalf("status %q want 'value is not JSON'", m.status)
+	}
+}
+
+func TestTreeShortPaneScrollsMetaOff(t *testing.T) {
+	// A value with many keys + a short pane: navigating down must scroll the
+	// metadata block off so the whole panel (not just a few value rows) scrolls.
+	m := treeModel(t, `{"k0":0,"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"k9":9}`)
+	const innerH = 6
+
+	// At the top the last key isn't reachable yet (panel hasn't scrolled).
+	top := m.detailTreeView(innerH)
+	if strings.Contains(top, "k9") {
+		t.Fatalf("at top, last key k9 should not be visible yet:\n%s", top)
+	}
+
+	// Jump to the last row → the whole panel scrolls: the meta block goes off
+	// the top and the last key comes into view.
+	m = key(m, t, tea.KeyMsg{Type: tea.KeyEnd})
+	bottom := m.detailTreeView(innerH)
+	if strings.Contains(bottom, "topic:") {
+		t.Fatalf("at bottom, meta block should have scrolled off:\n%s", bottom)
+	}
+	if !strings.Contains(bottom, "k9") {
+		t.Fatalf("at bottom, last key k9 should be visible:\n%s", bottom)
 	}
 }
 

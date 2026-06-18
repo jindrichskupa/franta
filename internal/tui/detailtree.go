@@ -82,16 +82,24 @@ func (m Model) detailTreeView(innerH int) string {
 	if !ok {
 		return ""
 	}
-	meta := detailMetaBlock(r) + "\nvalue:"
-	metaLines := strings.Count(meta, "\n") + 1
-	treeH := innerH - metaLines
-	if treeH < 1 {
-		treeH = 1
+	// Treat the metadata block + the tree rows as one scrollable list so the
+	// whole panel scrolls together. On a short pane the meta block scrolls off
+	// as the cursor moves down, instead of pinning it and leaving only a few
+	// rows of value visible.
+	metaLines := strings.Split(strings.TrimRight(detailMetaBlock(r), "\n")+"\nvalue:", "\n")
+	nMeta := len(metaLines)
+	if innerH < 1 {
+		innerH = 1
 	}
-	body := windowedList(len(m.detailRows), m.detailTreeCursor, treeH, func(i int) string {
-		return renderTreeRow(m.detailRows[i], i == m.detailTreeCursor) + "\n"
+	total := nMeta + len(m.detailRows)
+	cursor := nMeta + m.detailTreeCursor // tree cursor offset past the meta lines
+	return windowedList(total, cursor, innerH, func(i int) string {
+		if i < nMeta {
+			return metaLines[i] + "\n"
+		}
+		j := i - nMeta
+		return renderTreeRow(m.detailRows[j], j == m.detailTreeCursor) + "\n"
 	})
-	return meta + "\n" + body
 }
 
 // toggleDetailRaw flips between the raw viewport and the JSON tree. Toggling to
