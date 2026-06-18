@@ -194,6 +194,26 @@ describe and refreshes the value.
 
 ## Install
 
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install --cask jindrichskupa/tap/franta
+```
+
+**Debian / Ubuntu** — grab the `.deb` from the [latest release](https://github.com/jindrichskupa/franta/releases/latest):
+
+```bash
+sudo apt install ./franta_*_amd64.deb
+```
+
+**Go:**
+
+```bash
+go install github.com/jindrichskupa/franta/cmd/franta@latest
+```
+
+**From source:**
+
 ```bash
 go install ./cmd/franta
 # or:

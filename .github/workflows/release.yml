@@ -31,3 +31,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT that can push to jindrichskupa/homebrew-tap (the default
+          # GITHUB_TOKEN is scoped to this repo only). Add it under
+          # Settings → Secrets → Actions. If the secret is absent the cask
+          # step fails; remove homebrew_casks from .goreleaser.yaml to skip it.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

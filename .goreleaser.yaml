@@ -77,6 +77,34 @@ nfpms:
         - statically-linked-binary
         - changelog-file-missing-in-native-package
 
+# Homebrew tap (cask). goreleaser pushes a generated cask to the tap repo on
+# each release. Users then:  brew install --cask jindrichskupa/tap/franta
+# Prerequisites (one-time, manual):
+#   1. Create an empty public repo: github.com/jindrichskupa/homebrew-tap
+#   2. Create a GitHub PAT that can push to it (fine-grained: contents:write on
+#      homebrew-tap; or classic with `repo` scope).
+#   3. Add it as an Actions secret named HOMEBREW_TAP_GITHUB_TOKEN on this repo.
+# The default GITHUB_TOKEN cannot push to a different repo, hence the PAT.
+homebrew_casks:
+  - name: franta
+    repository:
+      owner: jindrichskupa
+      name: homebrew-tap
+      branch: master
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/jindrichskupa/franta"
+    description: "Terminal UI for Apache Kafka with MSK IAM auth, filter DSL, consumer-group lag, and Schema Registry decoding"
+    license: "MIT"
+    # The released binary is unsigned; strip the Gatekeeper quarantine xattr on
+    # install so macOS doesn't block first launch.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/franta"]
+          end
+
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
@@ -122,6 +150,11 @@ release:
     Terminal UI for Apache Kafka.
 
     ### Install
+
+    **Homebrew (macOS / Linux):**
+    ```bash
+    brew install --cask jindrichskupa/tap/franta
+    ```
 
     **Debian / Ubuntu:**
     ```bash
