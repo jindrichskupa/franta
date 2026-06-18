@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"franta/internal/record"
 )
@@ -145,6 +146,39 @@ func TestTreeShortPaneScrollsMetaOff(t *testing.T) {
 	}
 	if !strings.Contains(bottom, "k9") {
 		t.Fatalf("at bottom, last key k9 should be visible:\n%s", bottom)
+	}
+}
+
+func TestTreeViewHeightPayloadIndependent(t *testing.T) {
+	const innerH = 12
+	// A tiny value and one with very long strings (which would wrap and grow
+	// the box without the per-row line cap) must yield the same line count.
+	small := treeModel(t, `{"a":1}`)
+	bigVal := `{"blob":"` + strings.Repeat("x", 4000) + `","more":"` + strings.Repeat("y", 4000) + `","n":[1,2,3,4,5,6,7,8,9,10]}`
+	big := treeModel(t, bigVal)
+
+	for _, tc := range []struct {
+		name string
+		m    Model
+	}{{"small", small}, {"big", big}} {
+		got := tc.m.detailTreeView(innerH)
+		if lines := strings.Count(got, "\n") + 1; lines > innerH {
+			t.Fatalf("%s: detailTreeView produced %d lines, want <= %d", tc.name, lines, innerH)
+		}
+	}
+}
+
+func TestClampBlockTruncatesWidthAndHeight(t *testing.T) {
+	in := "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\ndddddddddd"
+	out := clampBlock(in, 4, 2)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("height: got %d lines want 2", len(lines))
+	}
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w > 4 {
+			t.Fatalf("width: line %q is %d cells, want <= 4", ln, w)
+		}
 	}
 }
 

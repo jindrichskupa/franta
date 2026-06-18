@@ -93,13 +93,35 @@ func (m Model) detailTreeView(innerH int) string {
 	}
 	total := nMeta + len(m.detailRows)
 	cursor := nMeta + m.detailTreeCursor // tree cursor offset past the meta lines
-	return windowedList(total, cursor, innerH, func(i int) string {
-		if i < nMeta {
-			return metaLines[i] + "\n"
+
+	// Emit AT MOST innerH visual lines so the pane height never depends on the
+	// payload. One tree row renders as exactly one line (long values are
+	// truncated by the caller's clamp, never wrapped); when the content is
+	// taller than the pane the last line is reserved for the "N/M" counter.
+	truncated := total > innerH
+	rows := innerH
+	if truncated {
+		rows = innerH - 1
+		if rows < 1 {
+			rows = 1
 		}
-		j := i - nMeta
-		return renderTreeRow(m.detailRows[j], j == m.detailTreeCursor) + "\n"
-	})
+	}
+	first, last := windowRange(cursor, rows, total)
+	var b strings.Builder
+	for i := first; i < last; i++ {
+		if i < nMeta {
+			b.WriteString(metaLines[i])
+		} else {
+			j := i - nMeta
+			b.WriteString(renderTreeRow(m.detailRows[j], j == m.detailTreeCursor))
+		}
+		b.WriteByte('\n')
+	}
+	if truncated {
+		fmt.Fprintf(&b, "%d/%d", m.detailTreeCursor+1, len(m.detailRows))
+		return b.String()
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // toggleDetailRaw flips between the raw viewport and the JSON tree. Toggling to

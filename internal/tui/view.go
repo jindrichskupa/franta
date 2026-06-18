@@ -7,10 +7,32 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"franta/internal/query"
 	"franta/internal/record"
 )
+
+// clampBlock makes a rendered block exactly fit a pane: at most h lines, each
+// truncated (ANSI-aware, no wrapping) to w cells. Without this a long value or
+// header line would wrap and push the bordered box taller than its requested
+// height, so the pane would visibly grow/shrink with the payload.
+func clampBlock(s string, w, h int) string {
+	if h < 1 {
+		h = 1
+	}
+	if w < 1 {
+		w = 1
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	for i, ln := range lines {
+		lines[i] = ansi.Truncate(ln, w, "…")
+	}
+	return strings.Join(lines, "\n")
+}
 
 var (
 	statusStyle = lipgloss.NewStyle().Faint(true)
@@ -200,8 +222,9 @@ func (m Model) normalView() string {
 		// the WindowSizeMsg handler.
 		detailBody = m.detailTreeView(detailH - 3)
 	}
-	detailContentStr := paneTitle("detail", m.paneFocus == paneDetail) + "\n" +
-		detailBody
+	detailContentStr := clampBlock(
+		paneTitle("detail", m.paneFocus == paneDetail)+"\n"+detailBody,
+		rightW-2, detailH-2)
 
 	topicsBox := paneStyle(m.paneFocus == paneTopics).
 		Width(leftW - 2).Height(msgsH + detailH - 2).
@@ -235,6 +258,7 @@ func (m Model) narrowOrShortView() string {
 		} else {
 			body = m.detail.View()
 		}
+		body = clampBlock(body, m.width-2, m.height-4)
 	default:
 		body = m.table.View()
 	}
