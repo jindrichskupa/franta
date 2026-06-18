@@ -29,6 +29,9 @@ type Callbacks struct {
 	Cluster string // shown in the header
 	Topic   string // shown in the header (initial topic)
 
+	Clusters      []string          // cluster names (for the C picker); ≤1 disables C
+	SwitchCluster SwitchClusterFunc // nil → C disabled
+
 	// Saved DSL filters: names + queries the user can recall with F. The save
 	// callback persists a new entry to the side-file (filters.yaml).
 	SavedFilters []SavedFilter
@@ -78,6 +81,10 @@ type DeleteFilterFunc func(name string) error
 // CopyFunc writes text to the system clipboard.
 type CopyFunc func(text string) error
 
+// SwitchClusterFunc switches the active cluster and returns the new consume
+// generation.
+type SwitchClusterFunc func(name string) (int64, error)
+
 // Run launches the TUI. Fetched records arriving on records are streamed into
 // the UI and errors on errs are shown in the status bar. errs may be nil. Run
 // blocks until the user quits.
@@ -102,6 +109,8 @@ func Run(records <-chan kafka.Fetched, errs <-chan error, cb Callbacks) error {
 	m.deleteFilterFn = cb.DeleteFilter
 	m.cluster = cb.Cluster
 	m.topic = cb.Topic
+	m.clusters = cb.Clusters
+	m.switchClusterFn = cb.SwitchCluster
 	if cb.Copy != nil {
 		m.copyFn = cb.Copy
 	}

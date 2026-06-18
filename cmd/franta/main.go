@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 
 	"github.com/atotto/clipboard"
@@ -16,6 +17,7 @@ import (
 	"franta/internal/kafka"
 	"franta/internal/query"
 	"franta/internal/record"
+	"franta/internal/session"
 	"franta/internal/tui"
 )
 
@@ -155,80 +157,51 @@ func runTUI(args []string) error {
 	// existing SwitchTopic flow then begins consumption.
 	topic := argTopic
 
-	var topics []string
-	if topic != "" {
-		topics = []string{topic}
-	}
-	consClient, err := kafka.NewClient(cl, topics...)
+	sess, err := session.Build(ctx, cl, name, topic)
 	if err != nil {
 		return err
-	}
-	defer consClient.Close()
-	prodClient, err := kafka.NewClient(cl)
-	if err != nil {
-		return err
-	}
-	defer prodClient.Close()
-
-	cons := kafka.NewConsumer(consClient, topic)
-	if cl.SchemaRegistry != nil {
-		var (
-			dec decode.Decoder
-			err error
-		)
-		switch cl.SchemaRegistry.Type {
-		case "", "confluent":
-			pw, perr := cl.SchemaRegistry.ResolvePassword()
-			if perr != nil {
-				return perr
-			}
-			dec, err = decode.NewConfluent(cl.SchemaRegistry.URL, cl.SchemaRegistry.Username, pw)
-		case "glue":
-			dec, err = decode.NewGlue(
-				cl.SchemaRegistry.Region,
-				cl.SchemaRegistry.Profile,
-				cl.SchemaRegistry.RegistryName,
-				cl.SchemaRegistry.Endpoint,
-			)
-		default:
-			return fmt.Errorf("schema_registry: unknown type %q", cl.SchemaRegistry.Type)
-		}
-		if err != nil {
-			return fmt.Errorf("schema_registry: %w", err)
-		}
-		cons.UseDecoder(dec)
 	}
 	if spec.Kind != kafka.StartEnd {
-		if err := cons.Seek(ctx, spec); err != nil {
+		if err := sess.Cons.Seek(ctx, spec); err != nil {
 			return fmt.Errorf("seek: %w", err)
 		}
 	}
 
 	records := make(chan kafka.Fetched, 128)
 	errs := make(chan error, 16)
-	go func() {
-		rerr := cons.Run(ctx, records, errs)
-		if rerr != nil && ctx.Err() == nil {
-			select {
-			case errs <- fmt.Errorf("consumer stopped: %w", rerr):
-			default:
-			}
-		}
-		close(records)
-		close(errs)
-	}()
+	sess.Start(records, errs)
+	// Defers run LIFO: declare the channel closes first so they run AFTER the
+	// session is stopped, ensuring the consumer goroutine (which writes to
+	// records/errs) has finished before the channels are closed.
+	defer close(errs)
+	defer close(records)
 
-	producer := kafka.NewProducer(prodClient)
+	// Reuse the cfg loaded above for the cluster list + switch lookups.
+	var clusters map[string]config.Cluster
+	clusterNames := []string{}
+	if cfg != nil {
+		clusters = cfg.Clusters
+		for n := range clusters {
+			clusterNames = append(clusterNames, n)
+		}
+		sort.Strings(clusterNames)
+	}
+	holder := session.NewHolder(ctx, clusters, records, errs, sess)
+	// Declared last → runs first: Stop waits the consumer goroutine before the
+	// channels above are closed.
+	defer holder.Cur().Stop()
+
 	return tui.Run(records, errs, tui.Callbacks{
-		Produce: func(r record.Record) error { return producer.Produce(ctx, r) },
-		Seek:    func(s kafka.StartSpec) (int64, error) { return seekGen(ctx, cons, s) },
+		Produce: func(r record.Record) error { return holder.Cur().Producer.Produce(ctx, r) },
+		Seek:    func(s kafka.StartSpec) (int64, error) { return seekGen(ctx, holder.Cur().Cons, s) },
 		ListTopics: func(internal bool) ([]kafka.TopicInfo, error) {
-			return kafka.ListTopicsBasic(ctx, consClient, internal)
+			return kafka.ListTopicsBasic(ctx, holder.Cur().Client, internal)
 		},
 		TopicOffsets: func(names []string) (map[string]int64, error) {
-			return kafka.FetchTopicOffsets(ctx, consClient, names)
+			return kafka.FetchTopicOffsets(ctx, holder.Cur().Client, names)
 		},
 		Switch: func(t string) (int64, error) {
+			cons := holder.Cur().Cons
 			if err := cons.SwitchTopic(ctx, t); err != nil {
 				return 0, err
 			}
@@ -243,35 +216,37 @@ func runTUI(args []string) error {
 			return cons.Gen(), nil
 		},
 		Groups: func() ([]kafka.GroupInfo, error) {
-			return kafka.ListGroupsBasic(ctx, consClient)
+			return kafka.ListGroupsBasic(ctx, holder.Cur().Client)
 		},
 		GroupLags: func(names []string) (map[string]int64, error) {
-			return kafka.FetchGroupLags(ctx, consClient, names)
+			return kafka.FetchGroupLags(ctx, holder.Cur().Client, names)
 		},
 		DescribeGroup: func(n string) (kafka.GroupDetail, error) {
-			return kafka.DescribeGroup(ctx, consClient, n)
+			return kafka.DescribeGroup(ctx, holder.Cur().Client, n)
 		},
 		ResetOffsets: func(g string, spec kafka.ResetSpec) error {
-			return kafka.ResetGroupOffsets(ctx, consClient, g, spec)
+			return kafka.ResetGroupOffsets(ctx, holder.Cur().Client, g, spec)
 		},
 		DeleteGroup: func(g string) error {
-			return kafka.DeleteGroup(ctx, consClient, g)
+			return kafka.DeleteGroup(ctx, holder.Cur().Client, g)
 		},
 		CreateTopic: func(name string, p int32, rf int16, cfg map[string]string) error {
-			return kafka.CreateTopic(ctx, consClient, name, p, rf, cfg)
+			return kafka.CreateTopic(ctx, holder.Cur().Client, name, p, rf, cfg)
 		},
-		DeleteTopic: func(name string) error { return kafka.DeleteTopic(ctx, consClient, name) },
+		DeleteTopic: func(name string) error { return kafka.DeleteTopic(ctx, holder.Cur().Client, name) },
 		AddPartitions: func(name string, total int) error {
-			return kafka.AddPartitions(ctx, consClient, name, total)
+			return kafka.AddPartitions(ctx, holder.Cur().Client, name, total)
 		},
 		GetTopicConfig: func(name string) ([]kafka.TopicConfigEntry, error) {
-			return kafka.GetTopicConfig(ctx, consClient, name)
+			return kafka.GetTopicConfig(ctx, holder.Cur().Client, name)
 		},
 		SetTopicConfig: func(name string, set map[string]string) error {
-			return kafka.SetTopicConfig(ctx, consClient, name, set)
+			return kafka.SetTopicConfig(ctx, holder.Cur().Client, name, set)
 		},
-		Cluster: name,
-		Topic:   topic,
+		Clusters:      clusterNames,
+		SwitchCluster: func(nm string) (int64, error) { return holder.Switch(nm) },
+		Cluster:       name,
+		Topic:         topic,
 		SavedFilters: func() []tui.SavedFilter {
 			out := make([]tui.SavedFilter, len(savedFilters))
 			for i, f := range savedFilters {
