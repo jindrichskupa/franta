@@ -44,6 +44,8 @@ archives:
       - README.md
       - LICENSE*
       - config.example.yaml
+      - completions/*
+      - man/franta.1
 
 # Debian / Ubuntu .deb packages built via nfpm (same .deb installs on both;
 # Ubuntu is Debian-derived and the dependency set used here is universal).
@@ -70,6 +72,14 @@ nfpms:
         type: config|noreplace
       - src: README.md
         dst: /usr/share/doc/franta/README.md
+      - src: completions/franta.bash
+        dst: /usr/share/bash-completion/completions/franta
+      - src: completions/franta.zsh
+        dst: /usr/share/zsh/site-functions/_franta
+      - src: completions/franta.fish
+        dst: /usr/share/fish/vendor_completions.d/franta.fish
+      - src: man/franta.1
+        dst: /usr/share/man/man1/franta.1
     # Same artifact works for Debian and Ubuntu — both consume .deb. The
     # release notes will recommend `apt install ./franta_*_amd64.deb`.
     deb:
@@ -96,6 +106,14 @@ homebrew_casks:
     homepage: "https://github.com/jindrichskupa/franta"
     description: "Terminal UI for Apache Kafka with MSK IAM auth, filter DSL, consumer-group lag, and Schema Registry decoding"
     license: "MIT"
+    # Shell completions + man page bundled in the release archive (see
+    # archives.files) and installed by the cask.
+    completions:
+      bash: completions/franta.bash
+      zsh: completions/franta.zsh
+      fish: completions/franta.fish
+    manpages:
+      - man/franta.1
     # The released binary is unsigned; strip the Gatekeeper quarantine xattr on
     # install so macOS doesn't block first launch.
     hooks:

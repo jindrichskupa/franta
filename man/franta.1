@@ -1,0 +1,97 @@
+.\" Manpage for franta.
+.TH FRANTA 1 "2026-06-19" "franta" "User Commands"
+.SH NAME
+franta \- terminal UI for Apache Kafka
+.SH SYNOPSIS
+.B franta
+.RI [ --config " PATH" ]
+.RI [ --cluster " NAME" ]
+.RI [ --from " POS" ]
+.RI [ TOPIC ]
+.br
+.B franta consume
+.RI [ --config " PATH" ]
+.RI [ --cluster " NAME" ]
+.RI [ --filter " QUERY" ]
+.RI [ --from " POS" ]
+.RI [ TOPIC ]
+.br
+.B franta version
+.SH DESCRIPTION
+.B franta
+is a terminal UI for Apache Kafka with AWS MSK IAM auth, an SQL-ish filter
+DSL, consumer-group lag, topic administration, and Schema Registry decoding
+(Confluent and AWS Glue).
+.PP
+With no subcommand it launches the interactive 3-pane TUI (topics, messages,
+detail). If
+.I TOPIC
+is omitted the topics pane is used to pick one; if no cluster is resolved a
+picker is shown.
+.SH SUBCOMMANDS
+.TP
+.B consume
+Stream matching records to stdout as JSON, without the TUI (headless).
+.TP
+.B version
+Print the version, commit, and build date, then exit.
+.SH OPTIONS
+.TP
+.BI --config " PATH"
+Path to the config file (default: the per-user config path).
+.TP
+.BI --cluster " NAME"
+Cluster name to use. Defaults to the config's
+.IR default_cluster .
+.TP
+.BI --from " POS"
+Start position. See
+.BR "START POSITIONS" .
+For the TUI the default comes from the cluster's
+.I default_seek
+or
+.BR end ;
+for
+.B consume
+it defaults to
+.BR end .
+.TP
+.BI --filter " QUERY"
+.RB ( consume
+only) DSL filter applied to streamed records, e.g.
+.RB \(dq value.amount\ >=\ 100 \(dq.
+.SH START POSITIONS
+The
+.B --from
+value accepts:
+.BR end ,
+.BR beginning ,
+.BI last: N
+(last N records),
+a Go duration such as
+.B 1h
+or
+.B 30m
+(relative to now), or an RFC3339 timestamp such as
+.BR 2026-05-27T00:00:00Z .
+.SH FILES
+.TP
+.I ~/.config/franta/config.yaml
+Default config file (clusters, auth, schema registry, saved filters). Override
+with
+.BR --config .
+.TP
+.I filters.yaml
+Saved DSL filters, kept next to the config file.
+.SH EXAMPLES
+.TP
+Open the TUI on the default cluster:
+.B franta
+.TP
+Open a topic from the end:
+.B franta --cluster prod-msk orders
+.TP
+Headless tail with a filter:
+.B franta consume --from last:100 --filter 'partition == 0' orders
+.SH SEE ALSO
+Project home: https://github.com/jindrichskupa/franta
