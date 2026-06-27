@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/table"
@@ -104,6 +105,8 @@ type DescribeGroupFunc func(name string) (kafka.GroupDetail, error)
 type Model struct {
 	buf  *record.Buffer
 	pred query.Predicate
+
+	meter rateMeter // rolling msg/s + bytes/s over the live tail
 
 	mode      viewMode
 	width     int
@@ -317,7 +320,15 @@ func (m Model) Init() tea.Cmd {
 	// Init runs on a value receiver, so bumping m.topicLoadGen here would be
 	// lost. The model passed to tea.NewProgram is what Update sees; bumping
 	// in Run() before launching keeps generations consistent. Start at gen=1.
-	return m.loadTopicsCmd()
+	return tea.Batch(m.loadTopicsCmd(), rateTickCmd())
+}
+
+// rateTickMsg fires once per second to advance the throughput meter window.
+type rateTickMsg struct{}
+
+// rateTickCmd schedules the next throughput tick.
+func rateTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return rateTickMsg{} })
 }
 
 // visible returns buffered records matching the current predicate, newest first.
@@ -383,6 +394,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshDetail()
 		return m, nil
 
+	case rateTickMsg:
+		if !m.paused {
+			m.meter.tick()
+		}
+		return m, rateTickCmd()
+
 	case RecordMsg:
 		if msg.Gen < m.curGen {
 			return m, nil // record from a superseded position
@@ -391,11 +408,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// First record of a new generation: drop the prior position's view.
 			m.curGen = msg.Gen
 			m.buf = record.NewBuffer(bufferCap)
+			m.meter.reset() // new position → stale rate must not carry over
 		}
 		m.buf.Add(msg.Record)
-		// Skip redraw while paused so the user can read the current snapshot;
-		// records still accumulate in the buffer and appear on resume.
+		// ponytail: records buffered during a pause are not metered; the meter
+		// reflects live, un-paused flow.
 		if !m.paused {
+			m.meter.record(recordBytes(msg.Record))
 			m.refreshTable()
 			m.refreshDetail()
 		}
@@ -744,7 +763,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		m.paused = !m.paused
 		if !m.paused {
-			// Resume: redraw with all records buffered while paused.
+			// Resume: redraw with all records buffered while paused, and start
+			// the rate window fresh so it doesn't show a stale pre-pause value.
+			m.meter.reset()
 			m.refreshTable()
 			m.refreshDetail()
 		}
