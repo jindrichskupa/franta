@@ -29,6 +29,7 @@ const (
 	modeProducer
 	modeGroups
 	modeExport
+	modeClusterInfo
 )
 
 // sortMode is the cycling sort order for the topics and groups lists. The
@@ -107,6 +108,15 @@ type Model struct {
 	pred query.Predicate
 
 	meter rateMeter // rolling msg/s + bytes/s over the live tail
+
+	// Cluster-info screen (modeClusterInfo) state.
+	clusterMeta         *kafka.ClusterMeta // nil → loading
+	clusterTopic        string             // snapshot topic for the right pane
+	clusterErr          string
+	clusterBrokerCursor int
+	clusterPartsFocused bool // false → brokers pane, true → partitions pane
+	clusterPartsVP      viewport.Model
+	describeClusterFn   DescribeClusterFunc
 
 	mode      viewMode
 	width     int
@@ -391,6 +401,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.groupDetail != nil {
 			m.groupDetailVP.SetContent(wrapForVP(renderGroupDetail(m.groupDetail), m.groupDetailVP.Width))
 		}
+		// Cluster-info partitions viewport shares the right column too.
+		m.clusterPartsVP = viewport.New(rightW-4, msgsH+detailH-4)
+		if m.clusterMeta != nil {
+			m.clusterPartsVP.SetContent(wrapForVP(renderPartitionTable(m.clusterMeta.Partitions), m.clusterPartsVP.Width))
+		}
 		m.refreshDetail()
 		return m, nil
 
@@ -399,6 +414,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.meter.tick()
 		}
 		return m, rateTickCmd()
+
+	case clusterMetaMsg:
+		if msg.err != nil {
+			m.clusterErr = msg.err.Error()
+			m.clusterMeta = nil
+			return m, nil
+		}
+		meta := msg.meta
+		m.clusterMeta = &meta
+		m.clusterErr = ""
+		if m.clusterBrokerCursor >= len(meta.Brokers) {
+			m.clusterBrokerCursor = 0
+		}
+		m.clusterPartsVP.SetContent(wrapForVP(renderPartitionTable(meta.Partitions), m.clusterPartsVP.Width))
+		m.clusterPartsVP.GotoTop()
+		return m, nil
 
 	case RecordMsg:
 		if msg.Gen < m.curGen {
@@ -716,6 +747,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateGroups(msg)
 	case modeExport:
 		return m.updateExport(msg)
+	case modeClusterInfo:
+		return m.updateClusterInfo(msg)
 	}
 
 	// modeNormal — text-input subscreens first (they swallow most keys).
@@ -854,6 +887,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "C":
 		m = m.openClusterPicker()
 		return m, nil
+	case "I":
+		return m.openClusterInfo()
 	}
 
 	// Pane-specific keys.

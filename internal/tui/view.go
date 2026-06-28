@@ -82,6 +82,8 @@ func (m Model) View() string {
 		return m.groupsView()
 	case modeExport:
 		return m.exportView()
+	case modeClusterInfo:
+		return m.clusterInfoView()
 	}
 	return m.normalView()
 }
@@ -156,6 +158,9 @@ const helpText = `franta — keys
   g                   consumer groups (modal): list left, lag+members right;
                       cursor auto-syncs detail; r refresh; esc back
   C                   switch cluster (picker; live re-wire, resets to topics)
+  I                   cluster info: brokers + controller (left) and the
+                      selected topic's partition leader/replicas/ISR (right);
+                      tab/1/2 switch pane, r reload, esc back
   space               pause / resume tailing (records keep buffering)
   esc                 cancel a prompt or close a modal
   ?                   toggle this help
@@ -430,15 +435,15 @@ func (m Model) normalFooter() string {
 	var hint string
 	switch m.paneFocus {
 	case paneTopics:
-		hint = "↑/↓ nav  enter switch  / search  o sort  i internal  r reload  •  n new  D del  a parts  c config  •  1/2/3 t tab focus  •  space pause  •  s p P g e  •  C cluster  •  ? help  q quit"
+		hint = "↑/↓ nav  enter switch  / search  o sort  i internal  r reload  •  n new  D del  a parts  c config  •  1/2/3 t tab focus  •  space pause  •  s p P g e  •  C cluster  •  I info  •  ? help  q quit"
 	case paneDetail:
 		if !m.detailRaw && m.detailTree != nil {
 			hint = "↑/↓ nav  enter fold  ←/→ collapse/expand  home/end top/bottom  •  v raw  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  ? help  q quit"
 		} else {
-			hint = "↑/↓/pgup/pgdn scroll  •  v tree  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  P produce-template  •  space pause  •  s p g e  •  C cluster  •  ? help  q quit"
+			hint = "↑/↓/pgup/pgdn scroll  •  v tree  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  P produce-template  •  space pause  •  s p g e  •  C cluster  •  I info  •  ? help  q quit"
 		}
 	default:
-		hint = "↑/↓ nav  / f filter (e.g. header['src'] == \"web\")  •  P produce-template  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  space pause  •  s p g e  •  C cluster  •  ? help  q quit"
+		hint = "↑/↓ nav  / f filter (e.g. header['src'] == \"web\")  •  P produce-template  •  y/Y/ctrl+y copy  •  1/2/3 t tab focus  •  space pause  •  s p g e  •  C cluster  •  I info  •  ? help  q quit"
 	}
 	prefix := ""
 	if m.paused {
