@@ -26,6 +26,8 @@ type Callbacks struct {
 	GetTopicConfig GetTopicConfigFunc // nil → c disabled
 	SetTopicConfig SetTopicConfigFunc
 
+	DescribeCluster DescribeClusterFunc // nil → I disabled
+
 	Cluster string // shown in the header
 	Topic   string // shown in the header (initial topic)
 
@@ -63,6 +65,9 @@ type GetTopicConfigFunc func(name string) ([]kafka.TopicConfigEntry, error)
 
 // SetTopicConfigFunc incrementally sets topic config keys.
 type SetTopicConfigFunc func(name string, set map[string]string) error
+
+// DescribeClusterFunc fetches cluster metadata + a topic's partition detail.
+type DescribeClusterFunc func(topic string) (kafka.ClusterMeta, error)
 
 // SavedFilter mirrors config.SavedFilter without coupling tui to the config
 // package (keeps tui tests dependency-free).
@@ -107,6 +112,7 @@ func Run(records <-chan kafka.Fetched, errs <-chan error, cb Callbacks) error {
 	m.savedFilters = cb.SavedFilters
 	m.saveFilterFn = cb.SaveFilter
 	m.deleteFilterFn = cb.DeleteFilter
+	m.describeClusterFn = cb.DescribeCluster
 	m.cluster = cb.Cluster
 	m.topic = cb.Topic
 	m.clusters = cb.Clusters

@@ -215,6 +215,9 @@ func runTUI(args []string) error {
 			}
 			return cons.Gen(), nil
 		},
+		DescribeCluster: func(topic string) (kafka.ClusterMeta, error) {
+			return kafka.DescribeCluster(ctx, holder.Cur().Client, topic)
+		},
 		Groups: func() ([]kafka.GroupInfo, error) {
 			return kafka.ListGroupsBasic(ctx, holder.Cur().Client)
 		},
