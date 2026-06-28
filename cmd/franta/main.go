@@ -191,6 +191,32 @@ func runTUI(args []string) error {
 	// channels above are closed.
 	defer holder.Cur().Stop()
 
+	// Schema browse is enabled only when the active decoder is a browsable
+	// (Confluent) registry. Glue / no-registry leave it nil → S disabled.
+	var browseSchemas tui.BrowseSchemasFunc
+	if _, ok := holder.Cur().Dec.(interface {
+		ListSchemas(context.Context) ([]decode.SchemaEntry, error)
+	}); ok {
+		browseSchemas = func() ([]tui.SchemaEntry, error) {
+			sl, ok := holder.Cur().Dec.(interface {
+				ListSchemas(context.Context) ([]decode.SchemaEntry, error)
+			})
+			if !ok {
+				// Active cluster switched to a non-Confluent registry.
+				return nil, fmt.Errorf("schema browse is only supported for a Confluent schema registry")
+			}
+			es, err := sl.ListSchemas(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]tui.SchemaEntry, len(es))
+			for i, e := range es {
+				out[i] = tui.SchemaEntry{Subject: e.Subject, Version: e.Version, ID: e.ID, Type: e.Type, Text: e.Text}
+			}
+			return out, nil
+		}
+	}
+
 	return tui.Run(records, errs, tui.Callbacks{
 		Produce: func(r record.Record) error { return holder.Cur().Producer.Produce(ctx, r) },
 		Seek:    func(s kafka.StartSpec) (int64, error) { return seekGen(ctx, holder.Cur().Cons, s) },
@@ -246,6 +272,7 @@ func runTUI(args []string) error {
 		SetTopicConfig: func(name string, set map[string]string) error {
 			return kafka.SetTopicConfig(ctx, holder.Cur().Client, name, set)
 		},
+		BrowseSchemas: browseSchemas,
 		Clusters:      clusterNames,
 		SwitchCluster: func(nm string) (int64, error) { return holder.Switch(nm) },
 		Cluster:       name,

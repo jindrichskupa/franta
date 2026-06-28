@@ -141,6 +141,59 @@ func (r *Registry) lookup(id int) (cachedSchema, bool) {
 	return pos, true
 }
 
+// SchemaEntry is one subject/version pair with its schema text, for browsing.
+type SchemaEntry struct {
+	Subject string
+	Version int
+	ID      int
+	Type    string // "AVRO" | "JSON" | "PROTOBUF" | "OTHER"
+	Text    string // unescaped schema text
+}
+
+// ListSchemas fetches every subject/version registered in the Schema Registry
+// in a single AllSchemas round-trip. Implementing this marks *Registry as
+// browsable (Confluent); GlueRegistry does not, so its browse stays disabled.
+func (r *Registry) ListSchemas(ctx context.Context) ([]SchemaEntry, error) {
+	if r.client == nil {
+		return nil, fmt.Errorf("schema registry client not configured")
+	}
+	all, err := r.client.AllSchemas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return srEntriesToSchemaEntries(all), nil
+}
+
+// srEntriesToSchemaEntries maps franz-go subject schemas into SchemaEntry,
+// preserving order. Pure → unit-testable without a live registry.
+func srEntriesToSchemaEntries(in []sr.SubjectSchema) []SchemaEntry {
+	out := make([]SchemaEntry, 0, len(in))
+	for _, s := range in {
+		out = append(out, SchemaEntry{
+			Subject: s.Subject,
+			Version: s.Version,
+			ID:      s.ID,
+			Type:    schemaTypeName(s.Type),
+			Text:    s.Schema.Schema,
+		})
+	}
+	return out
+}
+
+// schemaTypeName renders a SchemaType as a display string. The SR default type
+// is Avro, so the zero value maps to "AVRO".
+func schemaTypeName(t sr.SchemaType) string {
+	switch t {
+	case sr.TypeAvro:
+		return "AVRO"
+	case sr.TypeJSON:
+		return "JSON"
+	case sr.TypeProtobuf:
+		return "PROTOBUF"
+	}
+	return "OTHER"
+}
+
 func srTypeToKind(t sr.SchemaType) schemaKind {
 	switch t {
 	case sr.TypeAvro:

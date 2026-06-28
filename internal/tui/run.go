@@ -27,6 +27,7 @@ type Callbacks struct {
 	SetTopicConfig SetTopicConfigFunc
 
 	DescribeCluster DescribeClusterFunc // nil → I disabled
+	BrowseSchemas   BrowseSchemasFunc   // nil → S disabled
 
 	Cluster string // shown in the header
 	Topic   string // shown in the header (initial topic)
@@ -86,6 +87,20 @@ type DeleteFilterFunc func(name string) error
 // CopyFunc writes text to the system clipboard.
 type CopyFunc func(text string) error
 
+// SchemaEntry is one Schema Registry subject/version with its schema text.
+// tui-local so the package stays free of the decode/sr dependency.
+type SchemaEntry struct {
+	Subject string
+	Version int
+	ID      int
+	Type    string
+	Text    string
+}
+
+// BrowseSchemasFunc lists all Schema Registry subjects/versions. nil → S
+// disabled (e.g. no registry, or Glue which has no browse support).
+type BrowseSchemasFunc func() ([]SchemaEntry, error)
+
 // SwitchClusterFunc switches the active cluster and returns the new consume
 // generation.
 type SwitchClusterFunc func(name string) (int64, error)
@@ -113,6 +128,7 @@ func Run(records <-chan kafka.Fetched, errs <-chan error, cb Callbacks) error {
 	m.saveFilterFn = cb.SaveFilter
 	m.deleteFilterFn = cb.DeleteFilter
 	m.describeClusterFn = cb.DescribeCluster
+	m.browseSchemasFn = cb.BrowseSchemas
 	m.cluster = cb.Cluster
 	m.topic = cb.Topic
 	m.clusters = cb.Clusters
