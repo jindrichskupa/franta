@@ -28,6 +28,7 @@ const (
 	modeProducer
 	modeGroups
 	modeExport
+	modeSchema
 )
 
 // sortMode is the cycling sort order for the topics and groups lists. The
@@ -104,6 +105,19 @@ type DescribeGroupFunc func(name string) (kafka.GroupDetail, error)
 type Model struct {
 	buf  *record.Buffer
 	pred query.Predicate
+
+	// Schema-registry browse screen (modeSchema) state.
+	browseSchemasFn    BrowseSchemasFunc
+	schemas            []SchemaEntry // nil → loading
+	schemaErr          string
+	subjectGroups      []subjectGroup
+	filteredSubjects   []int // indices into subjectGroups after fuzzy filter
+	schemaSearch       string
+	searchingSchema    bool
+	schemaCursor       int
+	schemaVersionSel   map[string]int // subject → selected version
+	schemaPartsFocused bool           // false → subjects pane, true → text pane
+	schemaVP           viewport.Model
 
 	mode      viewMode
 	width     int
@@ -380,7 +394,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.groupDetail != nil {
 			m.groupDetailVP.SetContent(wrapForVP(renderGroupDetail(m.groupDetail), m.groupDetailVP.Width))
 		}
+		// Schema-browse text viewport shares the right column too.
+		m.schemaVP = viewport.New(rightW-4, msgsH+detailH-4)
+		m.refreshSchemaText()
 		m.refreshDetail()
+		return m, nil
+
+	case schemasMsg:
+		if msg.err != nil {
+			m.schemaErr = msg.err.Error()
+			m.schemas = nil
+			return m, nil
+		}
+		m.schemas = msg.entries
+		m.schemaErr = ""
+		m.subjectGroups = groupSubjects(msg.entries)
+		m.schemaVersionSel = map[string]int{}
+		m.applySchemaFilter()
+		if m.schemaCursor >= len(m.filteredSubjects) {
+			m.schemaCursor = 0
+		}
+		m.refreshSchemaText()
 		return m, nil
 
 	case RecordMsg:
@@ -697,6 +731,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateGroups(msg)
 	case modeExport:
 		return m.updateExport(msg)
+	case modeSchema:
+		return m.updateSchema(msg)
 	}
 
 	// modeNormal — text-input subscreens first (they swallow most keys).
@@ -833,6 +869,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "C":
 		m = m.openClusterPicker()
 		return m, nil
+	case "S":
+		return m.openSchemaBrowse()
 	}
 
 	// Pane-specific keys.
