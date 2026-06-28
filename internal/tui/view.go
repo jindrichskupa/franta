@@ -443,6 +443,8 @@ func (m Model) normalFooter() string {
 	prefix := ""
 	if m.paused {
 		prefix = "[PAUSED] "
+	} else if mps, bps := m.meter.rate(); mps > 0 {
+		prefix += fmt.Sprintf("↓ %s/s · %s/s  ", shortNum(int64(mps)), shortBytes(int64(bps)))
 	}
 	if m.topicSearch != "" {
 		prefix += fmt.Sprintf("[search: %s  %d/%d] ", m.topicSearch, len(m.filteredTopics), len(m.topics))
@@ -533,6 +535,21 @@ func shortNum(n int64) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1_000)
 	default:
 		return fmt.Sprintf("%d", n)
+	}
+}
+
+// shortBytes renders a byte count with a decimal kB/MB/GB suffix, matching
+// shortNum's style (decimal, not binary — one consistent convention).
+func shortBytes(n int64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.1fGB", float64(n)/1_000_000_000)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fMB", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fkB", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%dB", n)
 	}
 }
 
